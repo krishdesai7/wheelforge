@@ -75,50 +75,16 @@ def retag_wheel(
     target_dir.mkdir(parents=True, exist_ok=True)
     target: Path = target_dir / f"{name}-{version}-{tag}.whl"
 
-    record_name: str = f"{dist_info}/RECORD"
     wheel_meta_name: str = f"{dist_info}/WHEEL"
-    wheel_json_name: str = f"{dist_info}/WHEEL.json"
-
-    buffer = io.BytesIO()
-    records: list[tuple[str, str, int]] = []
-    seen_wheel_meta = False
 
     with zipfile.ZipFile(wheel) as src:
         if wheel_meta_name not in src.namelist():
             raise BuildError(
                 f"{wheel.name} has no {wheel_meta_name}; is it a valid wheel?"
             )
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as dst:
-            for item in src.infolist():
-                if item.filename == record_name:
-                    continue  # regenerated below
-                if item.is_dir():
-                    _write_dir(dst, item.filename)
-                    continue
+        payload: bytes = _rewritten_archive(src, tag, dist_info, executable_paths)
 
-                data: bytes = src.read(item.filename)
-                if item.filename == wheel_meta_name:
-                    data = _rewrite_wheel_metadata(data, tag)
-                    seen_wheel_meta = True
-                elif item.filename == wheel_json_name:
-                    # uv_build writes this alongside WHEEL as a non-standard
-                    # convenience copy. Leaving it stale would ship a wheel
-                    # whose two metadata files disagree about the tag.
-                    data = _rewrite_wheel_json(data, tag)
-
-                mode: Mode = (
-                    Mode.EXEC if item.filename in executable_paths else Mode.DATA
-                )
-                _write_file(dst, item.filename, data, mode)
-                records.append((item.filename, _sha256_digest(data), len(data)))
-
-            record_body: bytes = _render_record(records, record_name)
-            _write_file(dst, record_name, record_body, Mode.DATA)
-
-    if not seen_wheel_meta:  # pragma: no cover - guarded above
-        raise BuildError(f"{wheel.name}: WHEEL metadata was not rewritten")
-
-    _ = target.write_bytes(buffer.getvalue())
+    _ = target.write_bytes(payload)
     if target != wheel:
         wheel.unlink()
 
@@ -127,6 +93,61 @@ def retag_wheel(
         tag=tag,
         executables=tuple(sorted(executable_paths)),
     )
+
+
+def _rewritten_archive(
+    src: zipfile.ZipFile,
+    tag: str,
+    dist_info: str,
+    executable_paths: set[str],
+) -> bytes:
+    """The whole archive copied across with the new tag and a fresh RECORD."""
+    record_name: str = f"{dist_info}/RECORD"
+    buffer = io.BytesIO()
+    records: list[tuple[str, str, int]] = []
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            if item.filename != record_name:  # RECORD is regenerated below
+                records += _copy_member(
+                    dst, src, item, tag, dist_info, executable_paths
+                )
+        _write_file(dst, record_name, _render_record(records, record_name), Mode.DATA)
+
+    return buffer.getvalue()
+
+
+def _copy_member(
+    dst: zipfile.ZipFile,
+    src: zipfile.ZipFile,
+    item: zipfile.ZipInfo,
+    tag: str,
+    dist_info: str,
+    executable_paths: set[str],
+) -> list[tuple[str, str, int]]:
+    """Write one member into `dst`; its RECORD row, or none for a directory."""
+    if item.is_dir():
+        _write_dir(dst, item.filename)
+        return []
+    data: bytes = _retagged_member(src, item.filename, tag, dist_info)
+    mode: Mode = Mode.EXEC if item.filename in executable_paths else Mode.DATA
+    _write_file(dst, item.filename, data, mode)
+    return [(item.filename, _sha256_digest(data), len(data))]
+
+
+def _retagged_member(
+    src: zipfile.ZipFile, name: str, tag: str, dist_info: str
+) -> bytes:
+    """One member's bytes, with the two tag-bearing metadata files rewritten."""
+    data: bytes = src.read(name)
+    if name == f"{dist_info}/WHEEL":
+        return _rewrite_wheel_metadata(data, tag)
+    if name == f"{dist_info}/WHEEL.json":
+        # uv_build writes this alongside WHEEL as a non-standard convenience
+        # copy. Leaving it stale would ship a wheel whose two metadata files
+        # disagree about the tag.
+        return _rewrite_wheel_json(data, tag)
+    return data
 
 
 # --------------------------------------------------------------------------

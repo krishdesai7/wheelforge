@@ -75,26 +75,26 @@ class TestParseSource:
     @pytest.mark.parametrize(
         ("source", "expected"),
         [
-            ("starship/starship", ("starship", "starship", None)),
+            ("foo/foo", ("foo", "foo", None)),
             (
-                "https://github.com/starship/starship/releases/tag/v1.26.0",
-                ("starship", "starship", "v1.26.0"),
+                "https://github.com/foo/foo/releases/tag/v1.26.0",
+                ("foo", "foo", "v1.26.0"),
             ),
             (
-                "github.com/starship/starship/releases/tag/v1.26.0",
-                ("starship", "starship", "v1.26.0"),
+                "github.com/foo/foo/releases/tag/v1.26.0",
+                ("foo", "foo", "v1.26.0"),
             ),
             (
-                "https://github.com/starship/starship/releases/latest",
-                ("starship", "starship", None),
+                "https://github.com/foo/foo/releases/latest",
+                ("foo", "foo", None),
             ),
             (
-                "https://github.com/starship/starship",
-                ("starship", "starship", None),
+                "https://github.com/foo/foo",
+                ("foo", "foo", None),
             ),
             (
-                "https://github.com/starship/starship.git",
-                ("starship", "starship", None),
+                "https://github.com/foo/foo.git",
+                ("foo", "foo", None),
             ),
         ],
     )

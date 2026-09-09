@@ -223,19 +223,7 @@ def _parse_elf(path: Path, head: bytes) -> BinaryInfo:
             f"Pass --platform-tag to override detection."
         )
 
-    (e_machine,) = struct.unpack_from(f"{endian}H", head, 0x12)
-    arch: str | None = ELF_MACHINES.get(e_machine)
-    if arch is None:
-        raise InspectionError(
-            f"{path}: unsupported ELF machine 0x{e_machine:x}. "
-            f"Pass --platform-tag to override detection."
-        )
-    # ppc64 in little-endian mode is a distinct wheel platform.
-    if arch == "ppc64" and ei_data == 1:
-        arch = "ppc64le"
-    # 32-bit ARM ELF is only armv7l for our purposes when it is 32-bit.
-    if arch == "armv7l" and ei_class == 2:
-        arch = "aarch64"
+    arch: str = _elf_arch(path, head, endian, ei_class, ei_data)
 
     # The interpreter path says which libc, which is only a Linux distinction;
     # on the BSDs it names that system's own loader and means nothing here.
@@ -257,6 +245,24 @@ def _parse_elf(path: Path, head: bytes) -> BinaryInfo:
     )
 
 
+def _elf_arch(path: Path, head: bytes, endian: str, ei_class: int, ei_data: int) -> str:
+    """Map `e_machine` to a wheel architecture, narrowed by class and endianness."""
+    (e_machine,) = struct.unpack_from(f"{endian}H", head, 0x12)
+    arch: str | None = ELF_MACHINES.get(e_machine)
+    if arch is None:
+        raise InspectionError(
+            f"{path}: unsupported ELF machine 0x{e_machine:x}. "
+            f"Pass --platform-tag to override detection."
+        )
+    # ppc64 in little-endian mode is a distinct wheel platform.
+    if arch == "ppc64" and ei_data == 1:
+        return "ppc64le"
+    # 32-bit ARM ELF is only armv7l for our purposes when it is 32-bit.
+    if arch == "armv7l" and ei_class == 2:
+        return "aarch64"
+    return arch
+
+
 def _elf_libc(path: Path, head: bytes, ei_class: int, endian: str) -> str:
     """Infer the libc flavour from the ELF program interpreter.
 
@@ -264,44 +270,62 @@ def _elf_libc(path: Path, head: bytes, ei_class: int, endian: str) -> str:
     any libc, which is the common case for Rust and Go tools.
     """
     try:
-        if ei_class == 2:  # ELF64
-            e_phoff = struct.unpack_from(f"{endian}Q", head, 0x20)[0]
-            e_phentsize = struct.unpack_from(f"{endian}H", head, 0x36)[0]
-            e_phnum = struct.unpack_from(f"{endian}H", head, 0x38)[0]
-        else:  # ELF32
-            e_phoff = struct.unpack_from(f"{endian}I", head, 0x1C)[0]
-            e_phentsize = struct.unpack_from(f"{endian}H", head, 0x2A)[0]
-            e_phnum = struct.unpack_from(f"{endian}H", head, 0x2C)[0]
-
+        e_phoff, e_phentsize, e_phnum = _elf_phdr_geometry(head, ei_class, endian)
         if not e_phoff or not e_phnum or e_phnum > 0x400:
             return "static"
 
         with path.open("rb") as fh:
             _ = fh.seek(e_phoff)
-            table: bytes = fh.read(e_phentsize * e_phnum)  # pyrefly: ignore[unknown-argument-type]
-            for i in range(e_phnum):
-                entry: bytes = table[i * e_phentsize : (i + 1) * e_phentsize]
-                if len(entry) < e_phentsize:
-                    break
-                (p_type,) = struct.unpack_from(f"{endian}I", entry, 0)
-                if p_type != PT_INTERP:
-                    continue
-                if ei_class == 2:
-                    p_offset = struct.unpack_from(f"{endian}Q", entry, 0x08)[0]
-                    p_filesz = struct.unpack_from(f"{endian}Q", entry, 0x20)[0]
-                else:
-                    p_offset = struct.unpack_from(f"{endian}I", entry, 0x04)[0]
-                    p_filesz = struct.unpack_from(f"{endian}I", entry, 0x10)[0]
-                if p_filesz > 0x1000:
-                    return "glibc"
-                _ = fh.seek(p_offset)
-                interp: str = (
-                    fh.read(p_filesz).rstrip(b"\x00").decode("utf-8", "replace")
-                )
-                return "musl" if "musl" in interp else "glibc"
+            table: bytes = fh.read(e_phentsize * e_phnum)
+            segment = _elf_interp_segment(table, e_phentsize, e_phnum, ei_class, endian)
+            if segment is None:
+                return "static"
+            p_offset, p_filesz = segment
+            if p_filesz > 0x1000:
+                return "glibc"
+            _ = fh.seek(p_offset)
+            interp: str = fh.read(p_filesz).rstrip(b"\x00").decode("utf-8", "replace")
+            return "musl" if "musl" in interp else "glibc"
     except OSError, struct.error:
         return "glibc"  # be conservative: assume the stricter requirement
-    return "static"
+
+
+def _elf_phdr_geometry(head: bytes, ei_class: int, endian: str) -> tuple[int, int, int]:
+    """`(e_phoff, e_phentsize, e_phnum)` from an ELF header of either class."""
+    if ei_class == 2:  # ELF64
+        return (
+            struct.unpack_from(f"{endian}Q", head, 0x20)[0],
+            struct.unpack_from(f"{endian}H", head, 0x36)[0],
+            struct.unpack_from(f"{endian}H", head, 0x38)[0],
+        )
+    return (  # ELF32
+        struct.unpack_from(f"{endian}I", head, 0x1C)[0],
+        struct.unpack_from(f"{endian}H", head, 0x2A)[0],
+        struct.unpack_from(f"{endian}H", head, 0x2C)[0],
+    )
+
+
+def _elf_interp_segment(
+    table: bytes, e_phentsize: int, e_phnum: int, ei_class: int, endian: str
+) -> tuple[int, int] | None:
+    """`(p_offset, p_filesz)` of the PT_INTERP entry in a program header table."""
+    for i in range(e_phnum):
+        entry: bytes = table[i * e_phentsize : (i + 1) * e_phentsize]
+        if len(entry) < e_phentsize:
+            return None
+        (p_type,) = struct.unpack_from(f"{endian}I", entry, 0)
+        if p_type != PT_INTERP:
+            continue
+        if ei_class == 2:
+            return (
+                struct.unpack_from(f"{endian}Q", entry, 0x08)[0],
+                struct.unpack_from(f"{endian}Q", entry, 0x20)[0],
+            )
+        return (
+            struct.unpack_from(f"{endian}I", entry, 0x04)[0],
+            struct.unpack_from(f"{endian}I", entry, 0x10)[0],
+        )
+    return None
 
 
 def _elf_glibc_min(
@@ -333,25 +357,34 @@ def _elf_glibc_min(
                 f"{endian}HHIII", verneed, offset
             )
             aux_offset: int = offset + aux
-            for _ in range(min(count, 0x100)):
-                if aux_offset + 0x10 > len(verneed):
-                    break
-                # Vernaux: hash(4) flags(2) other(2) name(4) next(4).
-                name, next_aux = struct.unpack_from(
-                    f"{endian}II", verneed, aux_offset + 0x08
-                )
-                match = GLIBC_VERSION_RE.match(strtab, name)
-                if match:
-                    versions.append((int(match[1]), int(match[2])))
-                if not next_aux:
-                    break
-                aux_offset += next_aux
+            versions += _vernaux_glibc_versions(
+                verneed, strtab, aux_offset, count, endian
+            )
             if not next_entry:
                 break
             offset += next_entry
     except OSError, struct.error:
         return None
     return max(versions) if versions else None
+
+
+def _vernaux_glibc_versions(
+    verneed: bytes, strtab: bytes, aux_offset: int, count: int, endian: str
+) -> list[tuple[int, int]]:
+    """The `GLIBC_x.y` versions named by one Verneed entry's Vernaux chain."""
+    versions: list[tuple[int, int]] = []
+    for _ in range(min(count, 0x100)):
+        if aux_offset + 0x10 > len(verneed):
+            break
+        # Vernaux: hash(4) flags(2) other(2) name(4) next(4).
+        name, next_aux = struct.unpack_from(f"{endian}II", verneed, aux_offset + 0x08)
+        match = GLIBC_VERSION_RE.match(strtab, name)
+        if match:
+            versions.append((int(match[1]), int(match[2])))
+        if not next_aux:
+            break
+        aux_offset += next_aux
+    return versions
 
 
 def _elf_verneed(
@@ -439,14 +472,21 @@ def _macho_min_version(
         cmd, cmdsize = struct.unpack_from(f"{endian}II", head, offset)
         if cmdsize < 0x08:
             return None
-        version: int | None = None
-        if cmd == LC_BUILD_VERSION and offset + 0x10 <= len(head):
-            (version,) = struct.unpack_from(f"{endian}I", head, offset + 0x0C)
-        elif cmd == LC_VERSION_MIN_MACOSX and offset + 0x0C <= len(head):
-            (version,) = struct.unpack_from(f"{endian}I", head, offset + 0x08)
+        version: int | None = _load_command_version(head, endian, cmd, offset)
         if version is not None:
             return ((version >> 0x10) & 0xFFFF, (version >> 0x08) & 0xFF)
         offset += cmdsize
+    return None
+
+
+def _load_command_version(
+    head: bytes, endian: str, cmd: int, offset: int
+) -> int | None:
+    """The packed version of a deployment-target load command, if it is one."""
+    if cmd == LC_BUILD_VERSION and offset + 0x10 <= len(head):
+        return int(struct.unpack_from(f"{endian}I", head, offset + 0x0C)[0])
+    if cmd == LC_VERSION_MIN_MACOSX and offset + 0x0C <= len(head):
+        return int(struct.unpack_from(f"{endian}I", head, offset + 0x08)[0])
     return None
 
 
@@ -462,6 +502,24 @@ def _parse_macho_universal(path: Path, head: bytes, magic_be: int) -> BinaryInfo
             f"it is probably not a Mach-O binary at all."
         )
 
+    arches, macos_min = _fat_slices(path, head, nfat, is_64)
+    if not arches:
+        raise InspectionError(f"{path}: fat Mach-O contains no recognised slices")
+
+    return BinaryInfo(
+        path=path,
+        format="macho-universal",
+        os="macos",
+        arch=arches[0],
+        macos_min=macos_min,
+        slices=tuple(dict.fromkeys(arches)),
+    )
+
+
+def _fat_slices(
+    path: Path, head: bytes, nfat: int, is_64: bool
+) -> tuple[list[str], tuple[int, int] | None]:
+    """The recognised slice architectures, and the first one's macOS floor."""
     entry_size: Literal[0x20, 0x14] = 0x20 if is_64 else 0x14
     arches: list[str] = []
     macos_min: tuple[int, int] | None = None
@@ -476,18 +534,7 @@ def _parse_macho_universal(path: Path, head: bytes, magic_be: int) -> BinaryInfo
         arches.append(arch)
         if macos_min is None:
             macos_min = _slice_min_version(path, head, off, is_64)
-
-    if not arches:
-        raise InspectionError(f"{path}: fat Mach-O contains no recognised slices")
-
-    return BinaryInfo(
-        path=path,
-        format="macho-universal",
-        os="macos",
-        arch=arches[0],
-        macos_min=macos_min,
-        slices=tuple(dict.fromkeys(arches)),
-    )
+    return arches, macos_min
 
 
 def _slice_min_version(

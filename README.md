@@ -47,14 +47,13 @@ Most tools you want to package are published as a GitHub release, so `fetch` get
 and checks them in one step:
 
 ```zsh
-$ wheelforge fetch https://github.com/starship/starship/releases/tag/v1.26.0 ~/starship
-starship/starship v1.26.0 -- 12 of 30 assets selected
-  ok starship-aarch64-apple-darwin.tar.gz (3.9 MiB, the GitHub API)
-  ok starship-aarch64-unknown-linux-musl.tar.gz (4.6 MiB, the GitHub API)
+$ wheelforge fetch https://github.com/<owner>/<repo>/releases/tag/<version> <destination-directory>
+<owner>/<repo> <version> -- <number of assets selected> of <total number of assets> assets selected
+  ok <asset-name>-<platform-tag>.tar.gz (size, the GitHub API)
   ...
-fetched 12 asset(s) into ~/starship, 12 executable(s) extracted
+fetched <number of assets> asset(s) into <destination-directory>, <number of executables> executable(s) extracted
 check what they are:
-  wheelforge inspect ~/starship
+  wheelforge inspect <destination-directory>
 ```
 
 Every asset is verified before it is unpacked, and each archive lands in a directory
@@ -64,12 +63,11 @@ the common case. See [Fetching release assets](#fetching-release-assets) for the
 `build` then takes that whole directory and turns it into one wheel per platform:
 
 ```zsh
-$ wheelforge build ~/starship -n py-starship -V 1.26.0
-building 11 wheels from 11 executables in ~/starship
-  ok py_starship-1.26.0-py3-none-macosx_11_0_arm64.whl (3.9 MiB)
-  ok py_starship-1.26.0-py3-none-manylinux_2_17_aarch64.musllinux_1_2_aarch64.whl (4.6 MiB)
+$ wheelforge build <destination-directory> -n <name> -V <version>
+building <number of wheels> wheels from <number of executables> executables in <destination-directory>
+  ok <name>-<version>-py3-none-<platform-tag>.whl (size)
   ...
-built 11 wheels into dist (launcher direct, scripts starship)
+built <number of wheels> wheels into dist (launcher direct, scripts <name>)
 check what would be uploaded:
   wheelforge publish dist/*.whl --dry-run
 ```
@@ -172,8 +170,8 @@ so re-running over a populated directory costs nothing.
 
 ### Extraction
 
-Each archive is unpacked into a directory named after it, so `starship-x86_64-apple-darwin.tar.gz`
-becomes `starship-x86_64-apple-darwin/`. Tarballs are extracted under Python's `data`
+Each archive is unpacked into a directory named after it, so `foo-x86_64-apple-darwin.tar.gz`
+becomes `foo-x86_64-apple-darwin/`. Tarballs are extracted under Python's `data`
 filter, which refuses `..` traversal, links pointing outside the destination and device
 nodes, and drops setuid bits — while keeping the executable bit, the one permission that
 has to survive. Zip archives get that bit restored explicitly, since `zipfile` discards
@@ -204,14 +202,14 @@ directory just means "not a binary", which is the common case rather than an err
 success.
 
 ```zsh
-$ wheelforge inspect ~/starship
+$ wheelforge inspect <destination-directory>
 path                                       platform tag
-starship-aarch64-apple-darwin/starship     macosx_11_0_arm64
-starship-aarch64-unknown-linux-musl/...    manylinux_2_17_aarch64.musllinux_1_2_aarch64
+<asset-name>-<platform-tag>/<asset-name>     <platform-tag>
+<asset-name>-<platform-tag>/...    <platform-tag>
 ...
-11 executable(s), 11 other file(s) ignored
+<number of executables> executable(s), <number of other files> other file(s) ignored
 build the whole directory:
-  wheelforge build ~/starship -n <name> -V <version>
+  wheelforge build <destination-directory> -n <name> -V <version>
 ```
 
 Every wheel in a batch shares one `--name` and `--version`, so the platform tag is the only
@@ -234,12 +232,12 @@ with its reason, because reporting is what that command is for. `build` refuses 
 naming every such file at once so that one pass through the directory is enough. Both then
 print the removal that fixes it:
 
-```
-no tag: starship-x86_64-unknown-freebsd/starship: no wheel platform tag exists for
+```bash
+no tag: foo-x86_64-unknown-freebsd/foo: no wheel platform tag exists for
 freebsd; Python packaging defines tags for Linux, macOS and Windows only.
-remove them with: rm -r ~/starship/starship-x86_64-unknown-freebsd ~/starship/starship-x86_64-unknown-freebsd.tar.gz
+remove them with: rm -r <destination-directory>/foo-x86_64-unknown-freebsd <destination-directory>/foo-x86_64-unknown-freebsd.tar.gz
 then confirm the directory is clean:
-  wheelforge inspect ~/starship
+  wheelforge inspect <destination-directory>
 ```
 
 The archive is named alongside the unpacked directory on purpose: leaving it behind means
@@ -249,7 +247,7 @@ the next `fetch` puts the binary straight back.
 
 Building a wheel is one pipeline, and every stage is a module you can import and use on its own. `fetch` and `discover` sit in front of it; the four numbered stages below are the build itself.
 
-```
+```bash
 discover.collect      an executable, or every one under a directory
 probe.inspect_binary  read ELF/Mach-O/PE headers off disk
 tags.platform_tag     BinaryInfo -> PEP 425 platform tag
@@ -260,11 +258,11 @@ wheelfix.retag_wheel  rewrite the archive with the real platform tag
 
 ### 1. Input inspection
 
-Wheelforge reads the binary's own headers, namely, ELF, Mach-O (including universal binaries) and PE/COFF, to recover the target OS, CPU architecture, libc flavour and/or macOS deployment target. Nothing is inferred from the machine one is running on, so cross-packaging works. For example, one can build a Linux wheel from a Mac. A `#!` script has no headers to read and no platform to detect (see [Shell scripts](#shell-scripts)).
+Wheelforge reads the binary's own headers, namely, ELF, Mach-O (including universal binaries) and PE/COFF, to recover the target OS, CPU architecture, libc flavour and/or macOS deployment target. Nothing is inferred from the machine one is running on, so cross-packaging works. For example, one can build a Linux wheel from a Mac. A `#!` script has no headers to read and no platform to detect (see [Shell scripts](#shell-scripts)). For example,
 
 ```zsh
-$ wheelforge inspect ./rg-linux
-file       ./rg-linux
+$ wheelforge inspect ./foo-linux
+file       ./foo-linux
 format     elf
 os         linux
 arch       x86_64
@@ -299,7 +297,7 @@ The generated `README.md` becomes the wheel's long description — the PyPI proj
 ```markdown
 ## Provenance
 
-- **file** — `starship`
+- **file** — `foo`
 - **kind** — ELF executable, linux/x86_64, statically linked
 - **sha256** — `3696a6cf…`
 - **wheel tag** — `manylinux_2_17_x86_64.musllinux_1_2_x86_64`
@@ -375,7 +373,7 @@ Detected platforms map to tags as follows.
 ELF is not a Linux format. FreeBSD, NetBSD, OpenBSD and Solaris binaries are ELF too, and are identical to Linux ones in machine and libc; only `EI_OSABI` tells them apart. Python packaging defines no tag for those systems, so wheelforge names the system and refuses rather than passing a FreeBSD binary off as `manylinux`:
 
 ```zsh
-$ wheelforge inspect ./starship-x86_64-unknown-freebsd
+$ wheelforge inspect ./foo-x86_64-unknown-freebsd
 error: no wheel platform tag exists for freebsd; Python packaging defines tags
 for Linux, macOS and Windows only. Pass --platform-tag explicitly to package it
 anyway.
@@ -389,8 +387,8 @@ A platform tag says where an installer may _place_ a wheel, not merely where the
 
 Neither is true, so wheelforge emits both, as a PEP 425 compressed tag set:
 
-```
-py_starship-1.26.0-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl
+```bash
+py_<binary> -<version>-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl
 ```
 
 One wheel, honestly installable under either libc. The file name compresses the set; `WHEEL` gets the expanded form, one `Tag:` per line, as the spec requires.
@@ -400,7 +398,7 @@ One wheel, honestly installable under either libc. The file name compresses the 
 For a _dynamically_ linked glibc binary the manylinux baseline is read out of `.gnu.version_r` — the highest `GLIBC_x.y` symbol version the binary imports:
 
 ```zsh
-$ wheelforge inspect ./starship-x86_64-unknown-linux-gnu
+$ wheelforge inspect ./foo-x86_64-unknown-linux-gnu
 ...
 libc         glibc
 glibc min    2.18
@@ -416,8 +414,8 @@ A measurement can only raise the floor, never lower it. A binary importing nothi
 Not every tool is machine code. A file beginning with `#!` is recognised as a script and needs no special handling:
 
 ```zsh
-$ wheelforge inspect ./greet.sh
-file         ./greet.sh
+$ wheelforge inspect ./foo.sh
+file         ./foo.sh
 format       script
 os           any
 arch         any
@@ -425,16 +423,14 @@ interpreter  /usr/bin/env bash
 wheel tag    py3-none-any
 ```
 
-Nothing in a script constrains where it can be installed, so it is tagged `any` and the wheel is marked `Root-Is-Purelib: true`. The file extension is dropped when deriving the default alias, so `greet.sh` installs as `greet`. Everything else — the executable bit, both launchers, `binary_path()`, `python -m` — behaves exactly as it does for a binary.
+Nothing in a script constrains where it can be installed, so it is tagged `any` and the wheel is marked `Root-Is-Purelib: true`. The file extension is dropped when deriving the default alias, so `foo.sh` installs as `foo`. Everything else — the executable bit, both launchers, `binary_path()`, `python -m` — behaves exactly as it does for a binary.
 
 The one caveat is that `any` is broader than the truth. A wheel tagged `any` installs on Windows too, where `/bin/sh` does not exist, and no wheel tag can express "needs a POSIX shell". Wheelforge says so when it builds one:
 
 ```zsh
-$ wheelforge build ./greet.sh --name greet-bin --version 0.1.0
-note: greet.sh is a script run by /usr/bin/env bash, so the wheel is tagged any
-and will install anywhere, including where that interpreter does not exist. Pass
---platform-tag to narrow it.
-built dist/greet_bin-0.1.0-py3-none-any.whl (3.7 KiB)
+$ wheelforge build ./foo.sh --name foo-bin --version 0.1.0
+note: foo.sh is a script run by /usr/bin/env bash, so the wheel is tagged any and will install anywhere, including where that interpreter does not exist. Pass --platform-tag to narrow it.
+built dist/foo_bin-0.1.0-py3-none-any.whl (3.7 KiB)
 ```
 
 If the script is POSIX-only and that matters, restrict it explicitly with `--platform-tag manylinux_2_17_x86_64` or similar. A script without a `#!` line cannot be detected as one; pass `--platform-tag any` for those.
@@ -444,13 +440,12 @@ If the script is POSIX-only and that matters, restrict it explicitly with `--pla
 Before building, wheelforge asks PyPI whether `--name` is already registered, with a `HEAD` of `https://pypi.org/simple/<name>/`: 200 means the name exists, 404 means it is free to claim. A registered name stays 200 even after every release has been deleted or yanked, so it cannot be reclaimed.
 
 ```zsh
-$ wheelforge build ./rg --name ripgrep-bin --version 14.1.0
-note: ripgrep-bin is already registered on PyPI. Publishing will only work if
-      the project is yours; otherwise choose a different --name.
-built dist/ripgrep_bin-14.1.0-py3-none-macosx_11_0_arm64.whl (4.8 MiB)
+$ wheelforge build <destination-directory> --name <registered-name> --version <version>
+note: <registered-name> is already registered on PyPI. Publishing will only work if the project is yours; otherwise choose a different --name.
+built dist/<name>_bin-<version>-py3-none-<platform-tag>.whl (size)
 ```
 
-This is advice, not a gate. It never fails the build, because a 200 cannot tell your own project apart from someone else's, and rebuilding a package you already own is the usual case. A free name is not remarked on.
+The name lookup never fails the build, because a 200 cannot tell your own project apart from someone else's, and rebuilding a package you already own is the usual case. A free name is not remarked on.
 
 The lookup adds roughly 100 ms and is the only time wheelforge touches the network while building. If the index cannot be reached the build carries on regardless — pass `--verbose` to see that it was skipped, or `--no-check-name` to not ask at all. Building a directory asks once for the whole batch, since every wheel in it carries the same project name.
 
@@ -497,7 +492,7 @@ The binary is mapped into the wheel's `.data/scripts/` directory, so installers 
 
 There is deliberately no `[project.scripts]` entry in this mode: a console script of the same name is written to the same directory and would silently overwrite the binary at install time.
 
-Because the staged file is renamed after its alias, a Windows executable suffix is carried across: `starship.exe` with the default alias installs as `Scripts\starship.exe`, not `Scripts\starship`, which Windows would refuse to run. The alias itself is unaffected — the command is still `starship`. Only `PATHEXT` suffixes (`.exe`, `.com`, `.bat`, `.cmd`) are kept; `.sh` and the like are dropped, since on POSIX an extension on a command name is just noise.
+Because the staged file is renamed after its alias, a Windows executable suffix is carried across: `<binary-name>.exe` with the default alias installs as `Scripts\<binary-name>.exe`, not `Scripts\<binary-name>`, which Windows would refuse to run. The alias itself is unaffected — the command is still `<binary-name>`. Only `PATHEXT` suffixes (`.exe`, `.com`, `.bat`, `.cmd`) are kept; `.sh` and the like are dropped, since on POSIX an extension on a command name is just noise.
 
 ### `shim`
 
@@ -507,15 +502,7 @@ This costs one Python interpreter startup per invocation, but a single copy of t
 
 ### Which to use
 
-Measured on an Apple Silicon Mac, invoking `rg --version` 60 times and taking the median:
-
-| Launcher               | Time    |
-| ---------------------- | ------- |
-| `direct`               | 4.3 ms  |
-| `shim`                 | 29.3 ms |
-| Native (Homebrew `rg`) | 4.3 ms  |
-
-`direct` is exactly as fast as the binary installed by a system package manager, which is the point of the tool. Prefer `shim` only when a package exposes several aliases for one binary and wheel size matters, since `direct` needs a copy per alias.
+`direct` is exactly as fast as the binary installed by a system package manager, which is the point of the tool, and about 8 times faster than `shim`. Prefer `shim` only when a package exposes several aliases for one binary and wheel size matters, since `direct` needs a copy per alias.
 
 Either way the binary is reachable from Python:
 

@@ -180,7 +180,7 @@ def fetch_command(
 
     Example:
 
-        wheelforge fetch starship/starship ~/starship -t v1.26.0 -p '*-musl.tar.gz'
+        wheelforge fetch <owner>/<repo> <destination-dir> -t<version> -p '*-musl.tar.gz'
     """
     try:
         release: fetch.Release = _resolve_release(source, tag, timeout=timeout)
@@ -247,16 +247,26 @@ def _print_assets(release: fetch.Release, chosen: list[fetch.Asset]) -> None:
     still reported, so a release that publishes only `.msi` files reads as
     "wheelforge cannot use these" instead of "this release is empty".
     """
-    selected: set[str] = {a.name for a in chosen}
+    shown: list[fetch.Asset] = [
+        a for a in release.assets if fetch.is_payload_asset(a.name)
+    ]
+    if shown:
+        console.print(_asset_table(shown, {a.name for a in chosen}))
+    if any(not a.digest for a in shown):
+        console.print(
+            "[dim]note: assets showing no recorded digest are checked against "
+            "a checksum file in the release instead, if it publishes one.[/]"
+        )
+    _note_hidden_assets(release)
+
+
+def _asset_table(shown: list[fetch.Asset], selected: set[str]) -> Table:
+    """One row per listed asset, starred when it is one of the chosen."""
     table = Table(box=None, pad_edge=False)
     table.add_column("", style="green")
     table.add_column("asset")
     table.add_column("size", justify="right", style="dim")
     table.add_column("digest", style="dim")
-
-    shown: list[fetch.Asset] = [
-        a for a in release.assets if fetch.is_payload_asset(a.name)
-    ]
     for asset in shown:
         table.add_row(
             "*" if asset.name in selected else "",
@@ -264,15 +274,7 @@ def _print_assets(release: fetch.Release, chosen: list[fetch.Asset]) -> None:
             _human_size(asset.size),
             "recorded" if asset.digest else "-",
         )
-
-    if shown:
-        console.print(table)
-    if any(not a.digest for a in shown):
-        console.print(
-            "[dim]note: assets showing no recorded digest are checked against "
-            "a checksum file in the release instead, if it publishes one.[/]"
-        )
-    _note_hidden_assets(release)
+    return table
 
 
 def _note_hidden_assets(release: fetch.Release) -> None:
@@ -690,27 +692,15 @@ def build_command(
             },
         )
 
-        if found.is_single and platform_tag_override is None:
-            _note_tagging_caveats(found.candidates[0].info, plans[0][1].platform_tag)
-
-        if check_name:
-            # Once for the batch: every wheel carries the same project name.
-            _warn_if_name_is_taken(plans[0][1].dist_name, verbose=verbose)
-
         spec: PackageSpec = plans[0][1]
-        if spec.launcher is Launcher.DIRECT and len(spec.aliases) > 1:
-            # Each alias *is* the installed file, so each needs its own copy.
-            console.print(
-                f"[yellow]note:[/] {len(spec.aliases)} aliases in direct mode "
-                f"means {len(spec.aliases)} copies of the binary in the wheel. "
-                f"Use --launcher shim to share one copy."
-            )
-
-        if len(plans) > 1:
-            console.print(
-                f"[bold]building {len(plans)} wheels[/] "
-                f"[dim]from {len(found.candidates)} executables in {path}[/]"
-            )
+        _announce_build(
+            found,
+            plans,
+            path=path,
+            override=platform_tag_override,
+            check_name=check_name,
+            verbose=verbose,
+        )
 
         results: list[BuildResult] = build_packages(
             plans,
@@ -744,6 +734,40 @@ def build_command(
     if result.project_dir:
         console.print(f"[dim]  project  [/] {result.project_dir}")
     _suggest_publish(output, [result.wheel])
+
+
+def _announce_build(
+    found: discover.Discovery,
+    plans: list[tuple[Path, PackageSpec]],
+    *,
+    path: Path,
+    override: str | None,
+    check_name: bool,
+    verbose: bool,
+) -> None:
+    """Everything printed once, before the first wheel of a run is built."""
+    spec: PackageSpec = plans[0][1]
+
+    if found.is_single and override is None:
+        _note_tagging_caveats(found.candidates[0].info, spec.platform_tag)
+
+    if check_name:
+        # Once for the batch: every wheel carries the same project name.
+        _warn_if_name_is_taken(spec.dist_name, verbose=verbose)
+
+    if spec.launcher is Launcher.DIRECT and len(spec.aliases) > 1:
+        # Each alias *is* the installed file, so each needs its own copy.
+        console.print(
+            f"[yellow]note:[/] {len(spec.aliases)} aliases in direct mode "
+            f"means {len(spec.aliases)} copies of the binary in the wheel. "
+            f"Use --launcher shim to share one copy."
+        )
+
+    if len(plans) > 1:
+        console.print(
+            f"[bold]building {len(plans)} wheels[/] "
+            f"[dim]from {len(found.candidates)} executables in {path}[/]"
+        )
 
 
 def _suggest_publish(output: Path, wheels: list[Path]) -> None:
@@ -1002,13 +1026,7 @@ def publish_command(
         return
 
     if not yes:
-        console.print(
-            "[yellow]This cannot be undone: a released version cannot be "
-            "re-uploaded.[/]"
-        )
-        if not typer.confirm("Publish now?"):
-            console.print("aborted")
-            raise typer.Exit(code=1)
+        _confirm_publish()
 
     try:
         run_publish(plan)
@@ -1019,6 +1037,16 @@ def publish_command(
     installed: str | None = _project_name(plan.files)
     if installed:
         _suggest("install it from the index", "uv", "tool", "install", installed)
+
+
+def _confirm_publish() -> None:
+    """Ask before an upload that cannot be taken back."""
+    console.print(
+        "[yellow]This cannot be undone: a released version cannot be re-uploaded.[/]"
+    )
+    if not typer.confirm("Publish now?"):
+        console.print("aborted")
+        raise typer.Exit(code=1)
 
 
 def _invocation_without_dry_run(

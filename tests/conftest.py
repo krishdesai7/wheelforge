@@ -97,10 +97,7 @@ def make_elf(
     ident = bytes([0x7F, 0x45, 0x4C, 0x46, ei_class, 1 if little else 2, 1, osabi])
     ident += b"\x00" * 8
 
-    if bits == 0x40:
-        ehsize, phentsize, shentsize = 0x40, 0x38, 0x40
-    else:
-        ehsize, phentsize, shentsize = 0x34, 0x20, 0x28
+    ehsize, phentsize, _shentsize = elf_sizes(bits)
 
     phnum: Literal[0, 1] = 1 if interp else 0
     phoff: Literal[0, 0x34, 0x40] = ehsize if interp else 0
@@ -130,30 +127,50 @@ def make_elf(
             )
         )
 
+    header: bytes = make_elf_header(
+        ident,
+        endian,
+        bits,
+        machine,
+        phoff=phoff,
+        shoff=shoff,
+        phnum=phnum,
+        shnum=shnum,
+    )
+    body: bytes = make_interp_phdr(endian, bits, interp, interp_off) if interp else b""
+
+    return header + body + versions_blob + b"\x00" * 256
+
+
+def elf_sizes(
+    bits: int,
+) -> tuple[Literal[0x34, 0x40], Literal[0x20, 0x38], Literal[0x28, 0x40]]:
+    """`(e_ehsize, e_phentsize, e_shentsize)` for a 64- or 32-bit ELF."""
+    return (0x40, 0x38, 0x40) if bits == 0x40 else (0x34, 0x20, 0x28)
+
+
+def make_elf_header(
+    ident: bytes,
+    endian: str,
+    bits: int,
+    machine: int,
+    *,
+    phoff: int,
+    shoff: int,
+    phnum: int,
+    shnum: int,
+) -> bytes:
+    """The ELF file header proper, laid out for the class in `bits`."""
+    ehsize, phentsize, shentsize = elf_sizes(bits)
+    # e_type = ET_EXEC, e_version = 1, e_flags = 0, e_shstrndx = 0 throughout;
+    # the two classes differ only in the width of the offsets and the entry.
     if bits == 0x40:
-        header = ident + struct.pack(
+        return ident + struct.pack(
             f"{endian}HHIQQQIHHHHHH",
-            2,  # e_type = ET_EXEC
-            machine,
-            1,  # e_version
-            0x400000,  # e_entry
-            phoff,
-            shoff,
-            0,  # e_flags
-            ehsize,
-            phentsize,
-            phnum,
-            shentsize,
-            shnum,
-            0,  # e_shstrndx
-        )
-    else:
-        header = ident + struct.pack(
-            f"{endian}HHIIIIIHHHHHH",
             2,
             machine,
             1,
-            0x8048000,
+            0x400000,  # e_entry
             phoff,
             shoff,
             0,
@@ -164,36 +181,51 @@ def make_elf(
             shnum,
             0,
         )
+    return ident + struct.pack(
+        f"{endian}HHIIIIIHHHHHH",
+        2,
+        machine,
+        1,
+        0x8048000,  # e_entry
+        phoff,
+        shoff,
+        0,
+        ehsize,
+        phentsize,
+        phnum,
+        shentsize,
+        shnum,
+        0,
+    )
 
-    body = b""
-    if interp:
-        if bits == 64:
-            body = struct.pack(
-                f"{endian}IIQQQQQQ",
-                PT_INTERP,
-                4,  # p_flags = R
-                interp_off,
-                0,
-                0,
-                len(interp),  # p_filesz
-                len(interp),  # p_memsz
-                1,  # p_align
-            )
-        else:
-            body: bytes = struct.pack(
-                f"{endian}IIIIIIII",
-                PT_INTERP,
-                interp_off,
-                0,
-                0,
-                len(interp),
-                len(interp),
-                4,
-                1,
-            )
-        body += interp
 
-    return header + body + versions_blob + b"\x00" * 256
+def make_interp_phdr(endian: str, bits: int, interp: bytes, interp_off: int) -> bytes:
+    """A PT_INTERP program header followed by the interpreter path it points at."""
+    if bits == 64:
+        header = struct.pack(
+            f"{endian}IIQQQQQQ",
+            PT_INTERP,
+            4,  # p_flags = R
+            interp_off,
+            0,
+            0,
+            len(interp),  # p_filesz
+            len(interp),  # p_memsz
+            1,  # p_align
+        )
+    else:
+        header = struct.pack(
+            f"{endian}IIIIIIII",
+            PT_INTERP,
+            interp_off,
+            0,
+            0,
+            len(interp),
+            len(interp),
+            4,
+            1,
+        )
+    return header + interp
 
 
 def make_macho(cputype: int, *, minos: tuple[int, int] = (11, 0)) -> bytes:

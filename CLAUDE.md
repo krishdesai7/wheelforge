@@ -123,7 +123,7 @@ is wrong on that page for everyone who installed a different platform's wheel. E
 batch therefore gets the whole set — tag, kind and digest per wheel — and `scaffold._variant_facts`
 renders it. Two things are deliberately dropped in that mode: the `tag_note`, since each note
 explains one tag and the eleven do not share an explanation, and the `- **file**` line, since the
-packaged name varies (`starship` vs `starship.exe`). Without it every wheel in the batch renders a
+packaged name varies (`foo` vs `foo.exe`). Without it every wheel in the batch renders a
 byte-identical block, which is the property that makes PyPI's choice of file not matter — there is
 a test asserting exactly that. `with_variants` copies the specs rather than mutating them: a
 caller's `PackageSpec` is theirs, and rewriting one in place would make a wheel's contents depend
@@ -172,7 +172,7 @@ three steps later.
 
 `FetchedAsset.executables` decides membership by parsing the headers, never by the executable bit
 — the same rule as `discover.collect`, and for the same reason. A Windows-produced zip stores DOS
-attributes rather than a Unix mode, so `starship.exe` comes out of one with no `+x`; counting the
+attributes rather than a Unix mode, so `foo.exe` comes out of one with no `+x`; counting the
 bit reported "12 fetched, 9 extracted" for a release whose every archive held a binary, while
 `build` went on to package all twelve.
 
@@ -202,7 +202,7 @@ touching one, check all of:
 `PackageSpec.installed_names` encodes the consequence, and is the single source of truth that
 `staged_paths` and `archive_executables` both derive from — change it and they follow. In direct
 mode the staged file _becomes_ the command, so it is named after each alias rather than the source
-file, except that a `WINDOWS_EXEC_SUFFIXES` extension is carried over: `Scripts\starship` without
+file, except that a `WINDOWS_EXEC_SUFFIXES` extension is carried over: `Scripts\foo` without
 the `.exe` is a file Windows will not execute, while a `.sh` on `PATH` is only noise, so the rule
 is deliberately narrow rather than "keep the suffix".
 

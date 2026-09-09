@@ -64,7 +64,6 @@ PARTIAL_SUFFIX: Final[str] = ".part"
 SHA256_RE: Final[re.Pattern[str]] = re.compile(r"\A[0-9a-fA-F]{64}\Z")
 
 #: Longest first: `.tar.gz` must be tried before `.gz` so the stem comes out as
-#: `starship-x86_64-unknown-linux-musl` rather than `...musl.tar`.
 ARCHIVE_SUFFIXES: Final[tuple[str, ...]] = (
     ".tar.gz",
     ".tar.bz2",
@@ -90,7 +89,7 @@ SIDECAR_SUFFIXES: Final[tuple[str, ...]] = (
 )
 
 #: Whole-release checksum manifests, matched case-insensitively against the
-#: asset name. Compared as globs so `starship-v1.26.0-checksums.txt` matches.
+#: asset name. Compared as globs.
 CHECKSUM_GLOBS: Final[tuple[str, ...]] = (
     "checksums.txt",
     "checksums",
@@ -195,11 +194,9 @@ class FetchedAsset:
 
         Decided by the headers, never by the executable bit, for the same
         reason `discover.collect` decides it that way: a Windows-produced zip
-        stores DOS attributes rather than a Unix mode, so `starship.exe` comes
-        out of one with no `+x` and would go uncounted here while `build`
-        packaged it perfectly happily.
+        stores DOS attributes rather than a Unix mode.
         """
-        return tuple(p for p in self.extracted if _parses_as_executable(p))
+        return tuple(p for p in self.extracted if _parses_as_executable(path=p))
 
 
 # --------------------------------------------------------------------------
@@ -315,7 +312,7 @@ def parse_source(source: str) -> tuple[str, str, str | None]:
         raise FetchError(
             f"could not tell which repository {source!r} refers to. Give a "
             f"release URL like "
-            f"https://github.com/starship/starship/releases/tag/v1.26.0, or "
+            f"https://github.com/<owner>/<repo>/releases/tag/<version>, or "
             f"just `owner/repo`."
         )
 
@@ -516,17 +513,24 @@ def select_assets(release: Release, patterns: Sequence[str]) -> list[Asset]:
 
     wanted: set[str] = set()
     for pattern in patterns:
-        matched: list[Asset] = [a for a in payload if fnmatch.fnmatch(a.name, pattern)]
-        if not matched:
-            available: str = "\n".join(f"    {a.name}" for a in payload)
-            raise FetchError(
-                f"no asset in {release.slug} {release.tag} matches "
-                f"{pattern!r}{_filtered_detail(release, pattern)}. "
-                f"Available:\n{available}"
-            )
-        wanted.update(a.name for a in matched)
+        wanted.update(a.name for a in _matching_payload(release, payload, pattern))
 
     return [a for a in payload if a.name in wanted]
+
+
+def _matching_payload(
+    release: Release, payload: list[Asset], pattern: str
+) -> list[Asset]:
+    """The payload assets `pattern` matches; raise if it matches none."""
+    matched: list[Asset] = [a for a in payload if fnmatch.fnmatch(a.name, pattern)]
+    if not matched:
+        available: str = "\n".join(f"    {a.name}" for a in payload)
+        raise FetchError(
+            f"no asset in {release.slug} {release.tag} matches "
+            f"{pattern!r}{_filtered_detail(release, pattern)}. "
+            f"Available:\n{available}"
+        )
+    return matched
 
 
 def _filtered_detail(release: Release, pattern: str) -> str:
@@ -565,22 +569,30 @@ def parse_checksums(text: str, *, want: str, allow_bare: bool = False) -> str | 
     other clue about what it covers.
     """
     for line in text.splitlines():
-        stripped: str = line.strip()
-        if not stripped or stripped.startswith("#"):
+        row: tuple[str, str] | None = _checksum_row(line, allow_bare=allow_bare)
+        if row is None:
             continue
-        fields: list[str] = stripped.split()
-        if not SHA256_RE.match(fields[0]):
-            continue
-        if len(fields) == 1:
-            if allow_bare:
-                return fields[0].lower()
-            continue
-        # A leading `*` is GNU coreutils' binary-mode marker, and the recorded
-        # name may carry a directory the release does not reproduce.
-        recorded: str = Path(fields[-1].lstrip("*")).name
-        if recorded == want:
-            return fields[0].lower()
+        digest, recorded = row
+        # A bare digest names nothing, so it covers whatever the caller asked.
+        if not recorded or recorded == want:
+            return digest
     return None
+
+
+def _checksum_row(line: str, *, allow_bare: bool) -> tuple[str, str] | None:
+    """`(digest, name)` for one row, or `None` for a blank, comment or junk one.
+
+    The name is empty for a bare digest, which is only accepted at all when
+    `allow_bare` says the file's own name identifies what it covers.
+    """
+    fields: list[str] = line.strip().split()
+    if not fields or not SHA256_RE.match(fields[0]):
+        return None
+    if len(fields) == 1:
+        return (fields[0].lower(), "") if allow_bare else None
+    # A leading `*` is GNU coreutils' binary-mode marker, and the recorded
+    # name may carry a directory the release does not reproduce.
+    return fields[0].lower(), Path(fields[-1].lstrip("*")).name
 
 
 def _read_asset_text(asset: Asset, *, timeout: float, token: str | None) -> str | None:
@@ -815,6 +827,24 @@ def _extract_zip(archive: Path, dest: Path) -> list[Path]:
 # --------------------------------------------------------------------------
 
 
+def _refuse_unverifiable(
+    release: Release, plan: Sequence[tuple[Asset, Verification | None]]
+) -> None:
+    """Raise if any asset in `plan` has no digest to check it against."""
+    unverifiable: list[Asset] = [a for a, v in plan if v is None]
+    if not unverifiable:
+        return
+    listed: str = "\n".join(f"    {a.name}" for a in unverifiable)
+    raise FetchError(
+        f"no checksum is published for these assets of {release.slug} "
+        f"{release.tag}:\n{listed}\n"
+        f"GitHub only began recording a digest per asset in 2025, and this "
+        f"release ships no checksum file either. Pass --allow-unverified "
+        f"to download them anyway, having satisfied yourself some other "
+        f"way that they are what they claim to be."
+    )
+
+
 def fetch_assets(
     release: Release,
     assets: Sequence[Asset],
@@ -837,17 +867,8 @@ def fetch_assets(
         (a, find_digest(release, a, timeout=timeout, token=token)) for a in assets
     ]
 
-    unverifiable: list[Asset] = [a for a, v in plan if v is None]
-    if unverifiable and not allow_unverified:
-        listed: str = "\n".join(f"    {a.name}" for a in unverifiable)
-        raise FetchError(
-            f"no checksum is published for these assets of {release.slug} "
-            f"{release.tag}:\n{listed}\n"
-            f"GitHub only began recording a digest per asset in 2025, and this "
-            f"release ships no checksum file either. Pass --allow-unverified "
-            f"to download them anyway, having satisfied yourself some other "
-            f"way that they are what they claim to be."
-        )
+    if not allow_unverified:
+        _refuse_unverifiable(release, plan)
 
     results: list[FetchedAsset] = []
     for asset, verification in plan:

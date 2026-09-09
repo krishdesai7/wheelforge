@@ -76,17 +76,30 @@ def plan_publish(
         )
 
     argv: list[str] = [uv, "publish"]
-    if index:
-        argv += ["--index", index]
-    if publish_url:
-        argv += ["--publish-url", publish_url]
-    if username:
-        argv += ["--username", username]
+    argv += _destination_options(index, publish_url, username)
     argv += [str(Path(f).resolve()) for f in files]
 
     return PublishPlan(
         argv=argv, files=[Path(f) for f in files], needs_token=username is None
     )
+
+
+def _destination_options(
+    index: str | None, publish_url: str | None, username: str | None
+) -> list[str]:
+    """The uv options naming where to publish and as whom.
+
+    The token is deliberately absent: it reaches uv through the environment,
+    never through `argv`, which `display()` prints.
+    """
+    options: list[str] = []
+    if index:
+        options += ["--index", index]
+    if publish_url:
+        options += ["--publish-url", publish_url]
+    if username:
+        options += ["--username", username]
+    return options
 
 
 def run_publish(plan: PublishPlan) -> None:

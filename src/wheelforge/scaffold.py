@@ -34,6 +34,7 @@ import stat
 import textwrap
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
+from itertools import starmap
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -200,14 +201,13 @@ def _describe_tag(info: BinaryInfo, tag: str) -> str:
             "would withhold it from Alpine, and musllinux alone from glibc "
             "systems on architectures with no glibc build."
         )
-    if info.libc == "glibc":
-        floor: re.Match[str] | None = _MANYLINUX_RE.search(tag)
-        if floor:
-            return (
-                f"Dynamically linked against glibc. It needs version "
-                f"{floor[1]}.{floor[2]} or newer, which is what the manylinux "
-                f"tag records."
-            )
+    floor: re.Match[str] | None = _MANYLINUX_RE.search(tag)
+    if info.libc == "glibc" and floor:
+        return (
+            f"Dynamically linked against glibc. It needs version "
+            f"{floor[1]}.{floor[2]} or newer, which is what the manylinux "
+            f"tag records."
+        )
     if info.libc == "musl" and "musllinux" in tag:
         return "Dynamically linked against musl, so it installs on Alpine and kin."
     if info.is_universal and tag.endswith("universal2"):
@@ -249,8 +249,8 @@ class PackageSpec:
         In shim mode it keeps its original name inside the package, so there is
         one, whatever the aliases. In direct mode the staged file *becomes* the
         command, so there is one per alias, named after it -- except that a
-        Windows executable suffix is carried over, because a `starship.exe`
-        installed as `Scripts\\starship` is a file Windows will not run.
+        Windows executable suffix is carried over, because a `foo.exe`
+        installed as `Scripts\\foo` is a file Windows will not run.
         """
         if self.launcher is Launcher.SHIM:
             return [self.binary_name]
@@ -426,6 +426,16 @@ def stage_binary(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _toml_author(name: str, email: str) -> str:
+    """One entry of PEP 621's `authors` array; either half may be missing."""
+    parts: list[str] = []
+    if name:
+        parts.append(f"name = {toml_str(name)}")
+    if email:
+        parts.append(f"email = {toml_str(email)}")
+    return "{ " + ", ".join(parts) + " }"
+
+
 def _render_project_extra(spec: PackageSpec) -> str:
     """Render optional fields in the generated ``[project]`` table."""
     extra: list[str] = []
@@ -436,14 +446,7 @@ def _render_project_extra(spec: PackageSpec) -> str:
         # wheel's METADATA entirely.
         extra.append(f"license = {toml_str(spec.licence)}")
     if spec.authors:
-        entries: list[str] = []
-        for name, email in spec.authors:
-            parts: list[str] = []
-            if name:
-                parts.append(f"name = {toml_str(name)}")
-            if email:
-                parts.append(f"email = {toml_str(email)}")
-            entries.append("{ " + ", ".join(parts) + " }")
+        entries: list[str] = list(starmap(_toml_author, spec.authors))
         extra.append("authors = [" + ", ".join(entries) + "]")
     if spec.keywords:
         extra.append(f"keywords = {toml_array(spec.keywords)}")
@@ -558,7 +561,7 @@ def _variant_facts(spec: PackageSpec) -> list[str]:
     one tag, and the eleven tags here do not share an explanation.
 
     The `file` line goes too: the packaged name varies across the set --
-    `starship` on Linux, `starship.exe` on Windows -- so stating one of them is
+    `foo` on Linux, `foo.exe` on Windows -- so stating one of them is
     false for the rest. Without it every wheel in the batch renders exactly the
     same block, which is the property that makes it safe for PyPI to pick any
     one of them as the project description.

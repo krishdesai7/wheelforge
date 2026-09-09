@@ -92,10 +92,10 @@ class TestVersionNormalisation:
 
 class TestAliases:
     def test_defaults_to_the_binary_name(self) -> None:
-        assert spec(binary_name="rg").aliases == ["rg"]
+        assert spec(binary_name="bar").aliases == ["bar"]
 
     def test_windows_extension_is_stripped(self) -> None:
-        assert spec(binary_name="rg.exe").aliases == ["rg"]
+        assert spec(binary_name="bar.exe").aliases == ["bar"]
 
     def test_multiple_aliases_are_kept(self) -> None:
         assert spec(aliases=["wf", "wheelforge"]).aliases == ["wf", "wheelforge"]
@@ -281,18 +281,18 @@ class TestDirectLauncher:
 class TestWindowsSuffix:
     r"""Direct mode renames the staged file, and Windows reads the suffix.
 
-    A `starship.exe` installed as `Scripts\\starship` is a file Windows will
+    A `foo.exe` installed as `Scripts\\foo` is a file Windows will
     not execute, so `.exe` has to survive being renamed after the alias.
     """
 
     def test_exe_survives_the_rename(self) -> None:
-        s: PackageSpec = spec(binary_name="starship.exe", platform_tag="win_amd64")
-        assert s.installed_name == "starship.exe"
+        s: PackageSpec = spec(binary_name="foo.exe", platform_tag="win_amd64")
+        assert s.installed_name == "foo.exe"
 
     def test_the_alias_itself_is_unchanged(self) -> None:
-        """The suffix is on the file; the command is still `starship`."""
-        s: PackageSpec = spec(binary_name="starship.exe", platform_tag="win_amd64")
-        assert s.aliases == ["starship"]
+        """The suffix is on the file; the command is still `foo`."""
+        s: PackageSpec = spec(binary_name="foo.exe", platform_tag="win_amd64")
+        assert s.aliases == ["foo"]
 
     @pytest.mark.parametrize("suffix", [".exe", ".EXE", ".com", ".bat", ".cmd"])
     def test_every_pathext_suffix_is_kept(self, suffix: str) -> None:
@@ -308,8 +308,8 @@ class TestWindowsSuffix:
         assert s.installed_name == "tool"
 
     def test_an_explicit_alias_does_not_gain_a_second_suffix(self) -> None:
-        s: PackageSpec = spec(binary_name="starship.exe", aliases=["starship.exe"])
-        assert s.installed_name == "starship.exe"
+        s: PackageSpec = spec(binary_name="foo.exe", aliases=["foo.exe"])
+        assert s.installed_name == "foo.exe"
 
     def test_every_alias_gets_the_suffix(self) -> None:
         s: PackageSpec = spec(binary_name="tool.exe", aliases=["tool", "othertool"])
