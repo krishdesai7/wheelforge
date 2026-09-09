@@ -1,5 +1,5 @@
 [build-system]
-requires = ["uv_build>=0.11.30,<0.12"]
+requires = ["uv_build>=0.12.11,<0.13"]
 build-backend = "uv_build"
 
 
@@ -23,15 +23,11 @@ keywords = [
 ]
 license="MIT OR Apache-2.0"
 license-files = ["LICENSE-APACHE", "LICENSE-MIT"]
-# No `License ::` classifier: those are deprecated under PEP 639, and PyPI
-# rejects metadata carrying both them and the `license` expression above.
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    # The wheels it *produces* are platform-specific; wheelforge itself reads
-    # headers off disk and infers nothing from the host, so it runs anywhere.
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -42,12 +38,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "build>=1.2",
-    "packaging>=24.0",
+    "build>=1.5.0",
+    "packaging>=26.2",
     "typer>=0.27.0",
-    # The backend for generated projects. Depending on it directly lets the
-    # default build path skip PEP 517 isolation and run in-process.
-    "uv_build>=0.11.30,<0.12",
+    "uv_build>=0.12.11,<0.13",
 ]
 
 [project.scripts]
@@ -62,31 +56,26 @@ Releases = "https://github.com/krishdesai7/wheelforge/releases"
 name = "Krish Desai"
 email = "krish@desai.ml"
 
-
-[tool.uv]
-required-version = ">=0.11.30"
-preview-features = true
-
-[tool.uv.build-backend]
-editable-profile = "dev"
-module-name = "wheelforge"
-
-[[tool.uv.cache-keys]]
-file = "pyproject.toml"
-
-
 [dependency-groups]
 dev = [
     "complexipy>=6.2.0",
     "pyrefly>=1.1.1",
-    "pytest>=8.0",
-    "ruff>=0.15.18",
+    "pytest>=9.1.1",
+    "ruff>=0.16.0",
     "rust-just>=1.57.0",
 ]
 
-release = [
-  "rooster==0.1.1",
-]
+release = ["rooster==0.1.1"]
+
+[tool.uv]
+required-version = ">=0.12.11"
+preview-features = true
+
+[tool.uv.build-backend]
+module-name = "wheelforge"
+
+[[tool.uv.cache-keys]]
+file = "pyproject.toml"
 
 
 [tool.rooster]
@@ -147,7 +136,7 @@ extend-select = [
     "FURB", # refurb: Modernizes older idiom patterns to modern Python standards
     "T20",  # (flake8-print): Disallows print() statements in production code. Useful if you want to force all output through logging or dedicated output pipelines.
     "LOG",  # (flake8-logging): Flags logging anti-patterns (such as string formatting inside logger calls instead of passing lazy arguments).
-    "TCH",  # (flake8-type-checking): Automatically moves type-only imports behind if TYPE_CHECKING: blocks to reduce runtime import overhead.
+    "TC",  # (flake8-type-checking): Automatically moves type-only imports behind if TYPE_CHECKING: blocks to reduce runtime import overhead.
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -159,13 +148,20 @@ indent-style = "space"
 docstring-code-format = true
 
 
+[tool.ty]
+
+
 [tool.pyrefly]
 python-interpreter-path = ".venv/bin/python"
-search-path = ["."]
 site-package-path = []
-
 check-unannotated-defs = true
 infer-return-types = "checked"
+search-path = ["src", "."]
+preset = "all"
+permissive-ignores = true
+
+[tool.pyrefly.errors]
+implicit-bool = false
 
 
 [tool.complexipy]

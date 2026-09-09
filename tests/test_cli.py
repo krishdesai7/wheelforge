@@ -5,6 +5,7 @@ import re
 import shlex
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from typer.testing import CliRunner, Result
@@ -15,12 +16,15 @@ from wheelforge.pypi import NameStatus
 
 from .conftest import make_elf, make_pe
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 runner = CliRunner()
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 @pytest.fixture(autouse=True)
-def wide_console(monkeypatch) -> None:
+def wide_console(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop rich wrapping messages the assertions below match on.
 
     The consoles are module-level, so they take their width at import time --
@@ -53,14 +57,14 @@ class TestBareSubcommandShowsHelp:
     """`wheelforge COMMAND` with no arguments behaves like the bare app."""
 
     @pytest.mark.parametrize("command", ["fetch", "inspect", "build", "publish"])
-    def test_no_arguments_prints_the_commands_help(self, command) -> None:
+    def test_no_arguments_prints_the_commands_help(self, command: str) -> None:
         result = run(command)
         rendered = plain_output(result)
         assert f"Usage: wheelforge {command}" in rendered
         assert "--help" in rendered
 
     @pytest.mark.parametrize("command", ["fetch", "inspect", "build", "publish"])
-    def test_no_arguments_matches_explicit_help(self, command) -> None:
+    def test_no_arguments_matches_explicit_help(self, command: str) -> None:
         # Compared modulo trailing whitespace: click's no-args path omits the
         # blank line that its `--help` handler prints after the rendered help.
         assert run(command).output.rstrip() == run(command, "--help").output.rstrip()
@@ -70,11 +74,11 @@ class TestHelpCommand:
     """`wheelforge help COMMAND` is an alias for `COMMAND --help`."""
 
     @pytest.mark.parametrize("command", COMMANDS)
-    def test_matches_the_help_flag(self, command) -> None:
+    def test_matches_the_help_flag(self, command: str) -> None:
         assert run("help", command).output == run(command, "--help").output
 
     @pytest.mark.parametrize("command", COMMANDS)
-    def test_usage_line_is_fully_qualified(self, command) -> None:
+    def test_usage_line_is_fully_qualified(self, command: str) -> None:
         # The sub-context is parented to the root, so the usage line names the
         # program too rather than starting at the subcommand.
         assert f"Usage: wheelforge {command}" in plain_output(run("help", command))
@@ -95,12 +99,14 @@ class TestNameCheck:
     """`build` warns about a registered name, but never fails over it."""
 
     @pytest.fixture
-    def built(self, tmp_path, elf_binary, monkeypatch):
+    def built(
+        self, tmp_path: Path, elf_binary: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[Callable[[NameStatus, str], Result], list[str]]:
         """Run a build with a stubbed index, returning (invoke, calls)."""
         calls: list[str] = []
 
-        def build_with(status, *extra: str) -> Result:
-            def fake_check(name, **_kwargs):
+        def build_with(status: NameStatus, *extra: str) -> Result:
+            def fake_check(name: str, **_kwargs: dict[str, object]) -> NameStatus:
                 calls.append(name)
                 return status
 
@@ -119,7 +125,9 @@ class TestNameCheck:
 
         return build_with, calls
 
-    def test_a_taken_name_warns_but_still_builds(self, built) -> None:
+    def test_a_taken_name_warns_but_still_builds(
+        self, built: tuple[Callable[[NameStatus], Result], list[str]]
+    ) -> None:
         build_with, _ = built
         result = build_with(NameStatus.TAKEN)
         assert result.exit_code == 0
@@ -127,13 +135,17 @@ class TestNameCheck:
         assert "already registered" in written
         assert "built" in written
 
-    def test_an_available_name_says_nothing(self, built) -> None:
+    def test_an_available_name_says_nothing(
+        self, built: tuple[Callable[[NameStatus], Result], list[str]]
+    ) -> None:
         build_with, _ = built
         result = build_with(NameStatus.AVAILABLE)
         assert result.exit_code == 0
         assert "already registered" not in everything_written(result)
 
-    def test_an_unreachable_index_is_quiet_but_still_builds(self, built) -> None:
+    def test_an_unreachable_index_is_quiet_but_still_builds(
+        self, built: tuple[Callable[[NameStatus], Result], list[str]]
+    ) -> None:
         """Building offline must not be noisy, nor fail."""
         build_with, _ = built
         result = build_with(NameStatus.UNKNOWN)
@@ -141,29 +153,35 @@ class TestNameCheck:
         assert "could not reach" not in everything_written(result)
         assert "built" in everything_written(result)
 
-    def test_verbose_explains_an_unreachable_index(self, built) -> None:
+    def test_verbose_explains_an_unreachable_index(
+        self, built: tuple[Callable[[NameStatus, str], Result], list[str]]
+    ) -> None:
         build_with, _ = built
         result = build_with(NameStatus.UNKNOWN, "--verbose")
         assert "could not reach" in everything_written(result)
 
-    def test_no_check_name_makes_no_request_at_all(self, built) -> None:
+    def test_no_check_name_makes_no_request_at_all(
+        self, built: tuple[Callable[[NameStatus, str], Result], list[str]]
+    ) -> None:
         build_with, calls = built
         result = build_with(NameStatus.TAKEN, "--no-check-name")
         assert result.exit_code == 0
         assert calls == []
         assert "already registered" not in everything_written(result)
 
-    def test_the_normalised_name_is_what_gets_looked_up(self, built) -> None:
+    def test_the_normalised_name_is_what_gets_looked_up(
+        self, built: tuple[Callable[[NameStatus], Result], list[str]]
+    ) -> None:
         """PyPI's simple index is keyed by the PEP 503 form."""
         build_with, calls = built
-        build_with(NameStatus.AVAILABLE)
+        _ = build_with(NameStatus.AVAILABLE)
         assert calls == ["demo-bin"]
 
 
 class TestScriptSupport:
     """A `#!` script packages like a binary, but constrains no platform."""
 
-    def build_script(self, script, tmp_path, *extra: str) -> Result:
+    def build_script(self, script: Path, tmp_path: Path, *extra: str) -> Result:
         return run(
             "build",
             str(script),
@@ -177,7 +195,7 @@ class TestScriptSupport:
             *extra,
         )
 
-    def test_inspect_reports_the_interpreter(self, shell_script) -> None:
+    def test_inspect_reports_the_interpreter(self, shell_script: Path) -> None:
         result = run("inspect", str(shell_script))
         rendered = plain_output(result)
         assert result.exit_code == 0
@@ -186,19 +204,21 @@ class TestScriptSupport:
         assert "py3-none-any" in rendered
 
     def test_building_a_script_needs_no_platform_tag(
-        self, shell_script, tmp_path
+        self, shell_script: Path, tmp_path: Path
     ) -> None:
         result = self.build_script(shell_script, tmp_path)
         assert result.exit_code == 0
         assert (tmp_path / "dist" / "demo_bin-1.0.0-py3-none-any.whl").is_file()
 
-    def test_the_any_tag_is_explained(self, shell_script, tmp_path) -> None:
+    def test_the_any_tag_is_explained(self, shell_script: Path, tmp_path: Path) -> None:
         """`any` installs on Windows too, where /bin/sh does not exist."""
         written = everything_written(self.build_script(shell_script, tmp_path))
         assert "/bin/sh" in written
         assert "--platform-tag" in written
 
-    def test_an_explicit_tag_says_nothing(self, shell_script, tmp_path) -> None:
+    def test_an_explicit_tag_says_nothing(
+        self, shell_script: Path, tmp_path: Path
+    ) -> None:
         """The note is advice on a detected tag; an override is a decision."""
         result = self.build_script(
             shell_script, tmp_path, "--platform-tag", "manylinux_2_17_x86_64"
@@ -210,7 +230,9 @@ class TestScriptSupport:
 class TestInspectReporting:
     """What the detailed single-file view has to show."""
 
-    def test_the_measured_glibc_floor_is_shown(self, write_binary) -> None:
+    def test_the_measured_glibc_floor_is_shown(
+        self, write_binary: Callable[[str, bytes], Path]
+    ) -> None:
         """It decides the manylinux tag, so it must not be invisible."""
         binary = write_binary("tool", make_elf(0x3E, glibc_versions=["GLIBC_2.18"]))
         rendered = plain_output(run("inspect", str(binary)))
@@ -218,11 +240,15 @@ class TestInspectReporting:
         assert "2.18" in rendered
         assert "manylinux_2_18_x86_64" in rendered
 
-    def test_nothing_is_claimed_when_nothing_was_measured(self, write_binary) -> None:
+    def test_nothing_is_claimed_when_nothing_was_measured(
+        self, write_binary: Callable[[str, bytes], Path]
+    ) -> None:
         binary = write_binary("tool", make_elf(0x3E))
         assert "glibc min" not in plain_output(run("inspect", str(binary)))
 
-    def test_a_static_binary_shows_the_compressed_tag_set(self, write_binary) -> None:
+    def test_a_static_binary_shows_the_compressed_tag_set(
+        self, write_binary: Callable[[str, bytes], Path]
+    ) -> None:
         binary = write_binary("tool", make_elf(0x3E, interp=None))
         rendered = plain_output(run("inspect", str(binary)))
         assert "manylinux_2_17_x86_64.musllinux_1_2_x86_64" in rendered
@@ -232,7 +258,7 @@ class TestDirectoryInput:
     """`inspect` and `build` take a directory of binaries, not just one file."""
 
     @pytest.fixture
-    def release_dir(self, tmp_path):
+    def release_dir(self, tmp_path: Path) -> Path:
         """Two platforms unpacked beside the archives they came out of."""
         root = tmp_path / "downloads"
         for name, data in [
@@ -240,11 +266,13 @@ class TestDirectoryInput:
             ("tool-windows", make_pe(0x8664)),
         ]:
             (root / name).mkdir(parents=True)
-            (root / name / "tool").write_bytes(data)
-            (root / f"{name}.tar.gz").write_bytes(b"\x1f\x8b\x08 not a real archive")
+            _ = (root / name / "tool").write_bytes(data)
+            _ = (root / f"{name}.tar.gz").write_bytes(
+                b"\x1f\x8b\x08 not a real archive"
+            )
         return root
 
-    def build_dir(self, path, tmp_path, *extra: str) -> Result:
+    def build_dir(self, path: Path, tmp_path: Path, *extra: str) -> Result:
         return run(
             "build",
             str(path),
@@ -258,23 +286,23 @@ class TestDirectoryInput:
             *extra,
         )
 
-    def test_inspect_tabulates_every_binary(self, release_dir) -> None:
+    def test_inspect_tabulates_every_binary(self, release_dir: Path) -> None:
         rendered = plain_output(run("inspect", str(release_dir)))
         assert "manylinux_2_17_x86_64" in rendered
         assert "win_amd64" in rendered
         assert "2 executable(s)" in rendered
 
-    def test_inspect_says_what_it_passed_over(self, release_dir) -> None:
+    def test_inspect_says_what_it_passed_over(self, release_dir: Path) -> None:
         """Silence about the archives would look like they had been packaged."""
         rendered = plain_output(run("inspect", str(release_dir)))
         assert "2 other file(s) ignored" in rendered
 
     def test_inspect_reports_an_untaggable_binary_rather_than_aborting(
-        self, release_dir
+        self, release_dir: Path
     ) -> None:
         """Reporting is what inspect is for; refusing is build's job."""
         (release_dir / "bsd").mkdir()
-        (release_dir / "bsd" / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
+        _ = (release_dir / "bsd" / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
         result = run("inspect", str(release_dir))
         assert result.exit_code == 0
         rendered = plain_output(result)
@@ -282,14 +310,18 @@ class TestDirectoryInput:
         assert "freebsd" in rendered
         assert "win_amd64" in rendered  # the others are still listed
 
-    def test_a_lone_file_still_prints_the_detailed_view(self, release_dir) -> None:
+    def test_a_lone_file_still_prints_the_detailed_view(
+        self, release_dir: Path
+    ) -> None:
         rendered = plain_output(
             run("inspect", str(release_dir / "tool-linux" / "tool"))
         )
         assert "format" in rendered
         assert "arch" in rendered
 
-    def test_build_produces_one_wheel_per_binary(self, release_dir, tmp_path) -> None:
+    def test_build_produces_one_wheel_per_binary(
+        self, release_dir: Path, tmp_path: Path
+    ) -> None:
         result = self.build_dir(release_dir, tmp_path)
         assert result.exit_code == 0
         wheels = sorted(p.name for p in (tmp_path / "dist").glob("*.whl"))
@@ -300,17 +332,17 @@ class TestDirectoryInput:
         ]
 
     def test_build_reports_each_wheel_and_the_total(
-        self, release_dir, tmp_path
+        self, release_dir: Path, tmp_path: Path
     ) -> None:
         written = plain_output(self.build_dir(release_dir, tmp_path))
         assert "building 2 wheels" in written
         assert "built 2 wheels" in written
 
     def test_build_refuses_an_untaggable_binary_naming_it(
-        self, release_dir, tmp_path
+        self, release_dir: Path, tmp_path: Path
     ) -> None:
         (release_dir / "bsd").mkdir()
-        (release_dir / "bsd" / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
+        _ = (release_dir / "bsd" / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
         result = self.build_dir(release_dir, tmp_path)
         assert result.exit_code == 1
         written = everything_written(result)
@@ -318,18 +350,18 @@ class TestDirectoryInput:
         assert not (tmp_path / "dist").exists()
 
     def test_every_untaggable_binary_is_named_at_once(
-        self, release_dir, tmp_path
+        self, release_dir: Path, tmp_path: Path
     ) -> None:
         """One re-run should be enough to fix the directory, not one per file."""
         for name in ("bsd", "netbsd"):
             (release_dir / name).mkdir()
-            (release_dir / name / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
+            _ = (release_dir / name / "tool").write_bytes(make_elf(0x3E, osabi=0x09))
         written = everything_written(self.build_dir(release_dir, tmp_path))
         assert "/bsd/" in written
         assert "/netbsd/" in written
 
     def test_an_explicit_platform_tag_cannot_cover_a_directory(
-        self, release_dir, tmp_path
+        self, release_dir: Path, tmp_path: Path
     ) -> None:
         """One tag over many binaries means they all overwrite one another."""
         result = self.build_dir(
@@ -340,7 +372,9 @@ class TestDirectoryInput:
         assert "names one tag" in everything_written(result)
         assert not (tmp_path / "dist").exists()
 
-    def test_it_still_works_on_a_single_file(self, release_dir, tmp_path) -> None:
+    def test_it_still_works_on_a_single_file(
+        self, release_dir: Path, tmp_path: Path
+    ) -> None:
         """--platform-tag is only refused for a directory of several."""
         result = self.build_dir(
             release_dir / "tool-linux" / "tool",
@@ -353,35 +387,35 @@ class TestDirectoryInput:
             tmp_path / "dist" / "demo_bin-1.0.0-py3-none-manylinux_2_28_x86_64.whl"
         ).is_file()
 
-    def test_binaries_of_differing_names_are_refused(self, tmp_path) -> None:
+    def test_binaries_of_differing_names_are_refused(self, tmp_path: Path) -> None:
         """Otherwise the installed command would change with the platform."""
         root = tmp_path / "mixed"
         root.mkdir()
-        (root / "tool-linux").write_bytes(make_elf(0x3E, interp=None))
-        (root / "tool.exe").write_bytes(make_pe(0x8664))
+        _ = (root / "tool-linux").write_bytes(make_elf(0x3E, interp=None))
+        _ = (root / "tool.exe").write_bytes(make_pe(0x8664))
         result = self.build_dir(root, tmp_path)
         assert result.exit_code == 1
         written = everything_written(result)
         assert "--alias" in written
         assert not (tmp_path / "dist").exists()
 
-    def test_an_explicit_alias_settles_it(self, tmp_path) -> None:
+    def test_an_explicit_alias_settles_it(self, tmp_path: Path) -> None:
         root = tmp_path / "mixed"
         root.mkdir()
-        (root / "tool-linux").write_bytes(make_elf(0x3E, interp=None))
-        (root / "tool.exe").write_bytes(make_pe(0x8664))
+        _ = (root / "tool-linux").write_bytes(make_elf(0x3E, interp=None))
+        _ = (root / "tool.exe").write_bytes(make_pe(0x8664))
         result = self.build_dir(root, tmp_path, "-a", "tool")
         assert result.exit_code == 0
         assert len(list((tmp_path / "dist").glob("*.whl"))) == 2
 
     def test_the_name_is_looked_up_once_for_the_whole_batch(
-        self, release_dir, tmp_path, monkeypatch
+        self, release_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Every wheel carries the same project name; one question suffices."""
         calls: list[str] = []
         monkeypatch.setattr(
             "wheelforge.pypi.check_name",
-            lambda name, **_kw: calls.append(name) or NameStatus.AVAILABLE,
+            lambda name: calls.append(name) or NameStatus.AVAILABLE,  # pyrefly: ignore[unknown-argument-type,implicit-any-lambda]
         )
         result = run(
             "build",
@@ -396,8 +430,8 @@ class TestDirectoryInput:
         assert result.exit_code == 0
         assert calls == ["demo-bin"]
 
-    def test_a_directory_with_nothing_in_it_is_an_error(self, tmp_path) -> None:
-        empty = tmp_path / "empty"
+    def test_a_directory_with_nothing_in_it_is_an_error(self, tmp_path: Path) -> None:
+        empty: Path = tmp_path / "empty"
         empty.mkdir()
         result = run("inspect", str(empty))
         assert result.exit_code == 1
@@ -414,7 +448,7 @@ class TestUntaggableBinariesComeWithTheFix:
     """
 
     @pytest.fixture
-    def with_bsd(self, tmp_path):
+    def with_bsd(self, tmp_path: Path) -> Path:
         """A fetch-shaped directory: unpacked trees beside their archives."""
         root = tmp_path / "downloads"
         for name, data in [
@@ -422,30 +456,36 @@ class TestUntaggableBinariesComeWithTheFix:
             ("tool-freebsd", make_elf(0x3E, osabi=0x09)),
         ]:
             (root / name).mkdir(parents=True)
-            (root / name / "tool").write_bytes(data)
-            (root / f"{name}.tar.gz").write_bytes(b"\x1f\x8b\x08 not a real archive")
+            _ = (root / name / "tool").write_bytes(data)
+            _ = (root / f"{name}.tar.gz").write_bytes(
+                b"\x1f\x8b\x08 not a real archive"
+            )
         return root
 
-    def test_inspect_spells_out_the_removal(self, with_bsd) -> None:
+    def test_inspect_spells_out_the_removal(self, with_bsd: Path) -> None:
         rendered = plain_output(run("inspect", str(with_bsd)))
         assert "rm -r" in rendered
         assert str(with_bsd / "tool-freebsd") in rendered
 
-    def test_the_archive_is_removed_too_not_just_the_directory(self, with_bsd) -> None:
+    def test_the_archive_is_removed_too_not_just_the_directory(
+        self, with_bsd: Path
+    ) -> None:
         """Leaving it means the next --extract puts the binary straight back."""
         rendered = plain_output(run("inspect", str(with_bsd)))
         assert str(with_bsd / "tool-freebsd.tar.gz") in rendered
 
-    def test_the_usable_binaries_are_not_offered_for_deletion(self, with_bsd) -> None:
+    def test_the_usable_binaries_are_not_offered_for_deletion(
+        self, with_bsd: Path
+    ) -> None:
         rendered = plain_output(run("inspect", str(with_bsd)))
         advice = rendered[rendered.index("rm -r") :]
         assert "tool-linux" not in advice
 
-    def test_inspect_then_says_how_to_verify(self, with_bsd) -> None:
+    def test_inspect_then_says_how_to_verify(self, with_bsd: Path) -> None:
         rendered = plain_output(run("inspect", str(with_bsd)))
         assert f"wheelforge inspect {with_bsd}" in rendered
 
-    def test_build_gives_the_same_removal(self, with_bsd, tmp_path) -> None:
+    def test_build_gives_the_same_removal(self, with_bsd: Path, tmp_path: Path) -> None:
         result = run(
             "build",
             str(with_bsd),
@@ -464,7 +504,7 @@ class TestUntaggableBinariesComeWithTheFix:
         assert not (tmp_path / "dist").exists()
 
     def test_the_advice_is_what_actually_clears_the_directory(
-        self, with_bsd, tmp_path
+        self, with_bsd: Path, tmp_path: Path
     ) -> None:
         """The end-to-end claim: run the printed command, and the build works.
 
@@ -496,21 +536,25 @@ class TestCommandsPointAtTheNextStep:
     """Each command ends by naming the one that usually follows it."""
 
     @pytest.fixture
-    def binary(self, tmp_path):
+    def binary(self, tmp_path: Path) -> Path:
         path = tmp_path / "tool"
-        path.write_bytes(make_elf(0x3E, interp=None))
+        _ = path.write_bytes(make_elf(0x3E, interp=None))
         return path
 
-    def test_inspect_of_one_file_suggests_building_it(self, binary) -> None:
+    def test_inspect_of_one_file_suggests_building_it(self, binary: Path) -> None:
         rendered = plain_output(run("inspect", str(binary)))
         assert f"wheelforge build {binary}" in rendered
 
-    def test_inspect_of_a_clean_directory_suggests_building_it(self, binary) -> None:
+    def test_inspect_of_a_clean_directory_suggests_building_it(
+        self, binary: Path
+    ) -> None:
         """The directory, not the first binary: a release is built as a batch."""
         rendered = plain_output(run("inspect", str(binary.parent)))
         assert f"wheelforge build {binary.parent}" in rendered
 
-    def test_build_suggests_a_publish_dry_run(self, binary, tmp_path) -> None:
+    def test_build_suggests_a_publish_dry_run(
+        self, binary: Path, tmp_path: Path
+    ) -> None:
         result = run(
             "build",
             str(binary),
@@ -526,14 +570,16 @@ class TestCommandsPointAtTheNextStep:
         assert "wheelforge publish" in rendered
         assert "--dry-run" in rendered
 
-    def test_a_batch_build_suggests_publishing_all_of_them(self, tmp_path) -> None:
+    def test_a_batch_build_suggests_publishing_all_of_them(
+        self, tmp_path: Path
+    ) -> None:
         """One `uv publish`, or the project sits half-uploaded between runs."""
         root = tmp_path / "downloads"
         root.mkdir()
         (root / "linux").mkdir()
-        (root / "linux" / "tool").write_bytes(make_elf(0x3E, interp=None))
+        _ = (root / "linux" / "tool").write_bytes(make_elf(0x3E, interp=None))
         (root / "windows").mkdir()
-        (root / "windows" / "tool").write_bytes(make_pe(0x8664))
+        _ = (root / "windows" / "tool").write_bytes(make_pe(0x8664))
         result = run(
             "build",
             str(root),
@@ -548,8 +594,10 @@ class TestCommandsPointAtTheNextStep:
         assert result.exit_code == 0
         assert "*.whl" in plain_output(result)
 
-    def test_a_publish_dry_run_suggests_the_real_thing(self, binary, tmp_path) -> None:
-        run(
+    def test_a_publish_dry_run_suggests_the_real_thing(
+        self, binary: Path, tmp_path: Path
+    ) -> None:
+        _ = run(
             "build",
             str(binary),
             "-n",
@@ -575,12 +623,14 @@ class TestCommandsPointAtTheNextStep:
         assert "--publish-url https://test.pypi.org/legacy/" in rendered
         assert "--dry-run" not in rendered.split("upload them for real")[1]
 
-    def test_a_batch_rerun_is_a_glob_not_eleven_paths(self, tmp_path) -> None:
+    def test_a_batch_rerun_is_a_glob_not_eleven_paths(self, tmp_path: Path) -> None:
         """A line nobody reads before running defeats the point of echoing it."""
         wheels = [tmp_path / f"demo-{i}.whl" for i in range(11)]
         assert cli._as_glob(wheels) == [str(tmp_path / "*.whl")]
 
-    def test_wheels_from_different_directories_stay_spelled_out(self, tmp_path) -> None:
+    def test_wheels_from_different_directories_stay_spelled_out(
+        self, tmp_path: Path
+    ) -> None:
         """A glob over one of them would not name the others at all."""
         wheels = [tmp_path / "a" / "x.whl", tmp_path / "b" / "y.whl"]
         assert cli._as_glob(wheels) == [str(w) for w in wheels]
@@ -599,7 +649,9 @@ class TestFetchCommand:
     API = "https://api.github.com/repos/acme/tool/releases/tags/v1.0.0"
     ASSET = "https://example.test/tool-linux.tar.gz"
 
-    def stub_release(self, routes, tarball, *, digest: bool) -> None:
+    def stub_release(
+        self, routes: dict[str, bytes], tarball: tuple[bytes, str], *, digest: bool
+    ) -> None:
         data, checksum = tarball
         routes[self.API] = json.dumps(
             {
@@ -623,10 +675,10 @@ class TestFetchCommand:
         routes[self.ASSET] = data
 
     def test_a_release_is_downloaded_verified_and_unpacked(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=True)
-        result = run(
+        result: Result = run(
             "fetch",
             "https://github.com/acme/tool/releases/tag/v1.0.0",
             str(tmp_path),
@@ -635,25 +687,27 @@ class TestFetchCommand:
         )
         assert result.exit_code == 0
         assert (tmp_path / "tool-linux.tar.gz").is_file()
-        extracted = tmp_path / "tool-linux" / "tool"
+        extracted: Path = tmp_path / "tool-linux" / "tool"
         assert extracted.is_file()
         assert extracted.stat().st_mode & 0o111
 
     def test_the_summary_points_at_the_next_command(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=True)
-        result = run(
+        result: Result = run(
             "fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "-p", "*.tar.gz"
         )
         written = plain_output(result)
         assert "wheelforge build" in written
 
     def test_list_shows_the_assets_without_downloading(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=True)
-        result = run("fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "--list")
+        result: Result = run(
+            "fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "--list"
+        )
         assert result.exit_code == 0
         rendered = plain_output(result)
         assert "tool-linux.tar.gz" in rendered
@@ -661,10 +715,10 @@ class TestFetchCommand:
         assert list(tmp_path.iterdir()) == []
 
     def test_no_extract_leaves_the_archive_packed(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=True)
-        result = run(
+        result: Result = run(
             "fetch",
             "acme/tool",
             str(tmp_path),
@@ -679,11 +733,11 @@ class TestFetchCommand:
         assert not (tmp_path / "tool-linux").exists()
 
     def test_an_unverifiable_release_fails_and_names_the_override(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         """Old releases carry no digest; that must stop rather than warn."""
         self.stub_release(fake_http, tarball, digest=False)
-        result = run(
+        result: Result = run(
             "fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "-p", "*.tar.gz"
         )
         assert result.exit_code == 1
@@ -691,10 +745,10 @@ class TestFetchCommand:
         assert list(tmp_path.iterdir()) == []
 
     def test_the_override_downloads_it_anyway(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=False)
-        result = run(
+        result: Result = run(
             "fetch",
             "acme/tool",
             str(tmp_path),
@@ -708,16 +762,16 @@ class TestFetchCommand:
         assert (tmp_path / "tool-linux.tar.gz").is_file()
 
     def test_a_pattern_matching_nothing_is_an_error(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball, digest=True)
-        result = run(
+        result: Result = run(
             "fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "-p", "*-freebsd*"
         )
         assert result.exit_code == 1
         assert "no asset" in everything_written(result)
 
-    def test_a_tag_contradicting_the_url_is_refused(self, tmp_path) -> None:
+    def test_a_tag_contradicting_the_url_is_refused(self, tmp_path: Path) -> None:
         """Guessing which one was meant would silently fetch the wrong release."""
         result = run(
             "fetch",
@@ -743,7 +797,9 @@ class TestFetchHidesWhatItCannotUse:
 
     API = "https://api.github.com/repos/acme/tool/releases/tags/v1.0.0"
 
-    def stub_release(self, routes, tarball) -> None:
+    def stub_release(
+        self, routes: dict[str, bytes], tarball: tuple[bytes, str]
+    ) -> None:
         data, checksum = tarball
         assets = [
             ("tool-linux.tar.gz", f"sha256:{checksum}"),
@@ -767,20 +823,24 @@ class TestFetchHidesWhatItCannotUse:
         ).encode()
         routes["https://example.test/tool-linux.tar.gz"] = data
 
-    def listed(self, fake_http, tarball, tmp_path) -> str:
+    def listed(
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
+    ) -> str:
         self.stub_release(fake_http, tarball)
         return plain_output(
             run("fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "--list")
         )
 
-    def test_installers_are_not_listed(self, fake_http, tarball, tmp_path) -> None:
+    def test_installers_are_not_listed(
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
+    ) -> None:
         rendered = self.listed(fake_http, tarball, tmp_path)
         assert "tool-linux.tar.gz" in rendered
         assert "tool-windows.msi" not in rendered
         assert "tool-linux.deb" not in rendered
 
     def test_the_hidden_ones_are_still_accounted_for(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         """Silently dropping three of four assets would look like a bad release."""
         rendered = self.listed(fake_http, tarball, tmp_path)
@@ -788,12 +848,14 @@ class TestFetchHidesWhatItCannotUse:
         assert "cannot unpack" in rendered
         assert "checksum files" in rendered
 
-    def test_list_suggests_the_download(self, fake_http, tarball, tmp_path) -> None:
+    def test_list_suggests_the_download(
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
+    ) -> None:
         rendered = self.listed(fake_http, tarball, tmp_path)
         assert "wheelforge fetch acme/tool" in rendered
 
     def test_the_suggestion_carries_the_patterns_through(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball)
         rendered = plain_output(
@@ -811,7 +873,7 @@ class TestFetchHidesWhatItCannotUse:
         assert "-p *.tar.gz" in rendered
 
     def test_a_bare_fetch_downloads_only_the_usable_assets(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         """No -p at all means every eligible asset, not every asset."""
         self.stub_release(fake_http, tarball)
@@ -822,7 +884,7 @@ class TestFetchHidesWhatItCannotUse:
         assert not (tmp_path / "tool-linux.deb").exists()
 
     def test_asking_for_an_installer_explains_the_refusal(
-        self, fake_http, tarball, tmp_path
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:
         self.stub_release(fake_http, tarball)
         result = run("fetch", "acme/tool", str(tmp_path), "-t", "v1.0.0", "-p", "*.msi")
@@ -837,15 +899,15 @@ class TestPublishTakesNoToken:
         assert "--token" not in run("publish", "--help").output
 
     def test_missing_token_is_reported_before_the_prompt(
-        self, tmp_path, monkeypatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("UV_PUBLISH_TOKEN", raising=False)
-        wheel = tmp_path / "demo_bin-1.0.0-py3-none-any.whl"
-        wheel.write_bytes(b"not really a wheel")
+        wheel: Path = tmp_path / "demo_bin-1.0.0-py3-none-any.whl"
+        _ = wheel.write_bytes(b"not really a wheel")
 
         # No input supplied: if the confirmation prompt were reached first, the
         # runner would fail on the empty stdin rather than report the token.
-        result = run("publish", str(wheel))
+        result: Result = run("publish", str(wheel))
         assert result.exit_code == 1
         assert "UV_PUBLISH_TOKEN" in everything_written(result)
 
@@ -853,12 +915,12 @@ class TestPublishTakesNoToken:
 class TestErrorsAreNotReplacedByHelp:
     """Only the zero-argument case is special; bad input still errors."""
 
-    def test_missing_required_option_reports_the_error(self, elf_binary) -> None:
-        result = run("build", str(elf_binary))
+    def test_missing_required_option_reports_the_error(self, elf_binary: Path) -> None:
+        result: Result = run("build", str(elf_binary))
         assert result.exit_code != 0
         assert "--name" in everything_written(result)
 
-    def test_unknown_option_reports_the_error(self, elf_binary) -> None:
-        result = run("inspect", str(elf_binary), "--bogus")
+    def test_unknown_option_reports_the_error(self, elf_binary: Path) -> None:
+        result: Result = run("inspect", str(elf_binary), "--bogus")
         assert result.exit_code != 0
         assert "--bogus" in everything_written(result)

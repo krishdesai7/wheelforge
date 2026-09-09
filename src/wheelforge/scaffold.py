@@ -50,13 +50,15 @@ from .templates import (
     PROVENANCE_INTROS,
     PYPROJECT,
     README,
-    Template,
     toml_array,
     toml_str,
 )
 
 if TYPE_CHECKING:
+    from string import Template
+
     from .probe import BinaryInfo
+
 
 #: Directory, relative to the project root, holding binaries destined for
 #: `.data/scripts/`. Deliberately outside `src/` so it is not package data.
@@ -375,14 +377,14 @@ def scaffold_project(spec: PackageSpec, binary: Path, root: Path) -> Path:
     pkg_dir: Path = root / "src" / spec.module
     pkg_dir.mkdir(parents=True, exist_ok=True)
 
-    (root / "pyproject.toml").write_text(render_pyproject(spec), encoding="utf-8")
-    (root / "README.md").write_text(render_readme(spec), encoding="utf-8")
-    (pkg_dir / "__init__.py").write_text(render_init(spec), encoding="utf-8")
-    (pkg_dir / "__main__.py").write_text(render_main(spec), encoding="utf-8")
+    _ = (root / "pyproject.toml").write_text(render_pyproject(spec), encoding="utf-8")
+    _ = (root / "README.md").write_text(render_readme(spec), encoding="utf-8")
+    _ = (pkg_dir / "__init__.py").write_text(render_init(spec), encoding="utf-8")
+    _ = (pkg_dir / "__main__.py").write_text(render_main(spec), encoding="utf-8")
 
     for destination in staged_paths(spec, root):
         destination.parent.mkdir(parents=True, exist_ok=True)
-        stage_binary(binary, destination)
+        _ = stage_binary(binary, destination)
     return root
 
 
@@ -413,7 +415,7 @@ def stage_binary(source: Path, destination: Path) -> Path:
     a release tarball or extracted from a zip often arrives as 0o644, and the
     wheel must ship it executable.
     """
-    shutil.copyfile(source, destination)
+    _ = shutil.copyfile(source, destination)
     destination.chmod(
         stat.S_IRWXU  # rwx for owner
         | stat.S_IRGRP
@@ -562,7 +564,7 @@ def _variant_facts(spec: PackageSpec) -> list[str]:
     one of them as the project description.
     """
     facts: list[str] = []
-    for variant in sorted(spec.variants, key=lambda v: v.platform_tag):
+    for variant in sorted(spec.variants, key=lambda v: v.platform_tag):  # pyrefly: ignore[implicit-any-lambda]
         facts.append(f"- **`{variant.platform_tag}`**")
         if variant.kind:
             # Continuation lines of a list item: markdown reflows them into one

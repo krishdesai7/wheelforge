@@ -36,7 +36,7 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast, override
 
 from . import __version__
 from .errors import FetchError, InspectionError
@@ -209,7 +209,7 @@ class FetchedAsset:
 
 def _parses_as_executable(path: Path) -> bool:
     try:
-        inspect_binary(path)
+        _ = inspect_binary(path)
     except InspectionError, OSError:
         return False
     return True
@@ -377,13 +377,14 @@ class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
     confidentiality fix and the reason authenticated downloads work at all.
     """
 
+    @override
     def redirect_request(
         self,
         req: urllib.request.Request,
-        fp: Any,
+        fp: Any,  # pyrefly: ignore[explicit-any]
         code: int,
         msg: str,
-        headers: Any,
+        headers: Any,  # pyrefly: ignore[explicit-any]
         newurl: str,
     ) -> urllib.request.Request | None:
         new: urllib.request.Request | None = super().redirect_request(
@@ -407,7 +408,7 @@ def _request(url: str, *, token: str | None, accept: str) -> urllib.request.Requ
     return urllib.request.Request(url, headers=headers)  # ruff: ignore[suspicious-url-open-usage]
 
 
-def _open(url: str, *, timeout: float, token: str | None, accept: str) -> Any:
+def _open(url: str, *, timeout: float, token: str | None, accept: str) -> Any:  # pyrefly: ignore[explicit-any]
     opener: urllib.request.OpenerDirector = urllib.request.build_opener(
         _StripAuthOnRedirect
     )
@@ -462,7 +463,7 @@ def get_release(
         with _open(
             url, timeout=timeout, token=token, accept="application/vnd.github+json"
         ) as response:
-            payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
+            payload: dict[str, Any] = json.loads(s=response.read().decode("utf-8"))  # pyrefly: ignore[explicit-any,unknown-argument-type]
     except urllib.error.HTTPError as exc:
         raise _api_failure(exc, what) from exc
     except OSError as exc:
@@ -478,7 +479,7 @@ def get_release(
     )
 
 
-def _parse_asset(payload: dict[str, Any]) -> Asset:
+def _parse_asset(payload: dict[str, Any]) -> Asset:  # pyrefly: ignore[explicit-any]
     #: `digest` is `sha256:<hex>`; other algorithms would need their own
     #: handling, so anything unrecognised is treated as absent.
     raw: str = str(payload.get("digest") or "")
@@ -588,7 +589,7 @@ def _read_asset_text(asset: Asset, *, timeout: float, token: str | None) -> str 
         with _open(
             asset.url, timeout=timeout, token=token, accept="application/octet-stream"
         ) as response:
-            return response.read(64 * 1024).decode("utf-8", "replace")
+            return cast("str", response.read(64 * 1024).decode("utf-8", "replace"))
     except OSError:
         # A missing or unreadable checksum file is not fatal here; the caller
         # decides what an unverifiable asset means.
@@ -712,10 +713,10 @@ def download_asset(
             partial.open("wb") as out,
         ):
             while chunk := response.read(CHUNK):
-                digest.update(chunk)
-                out.write(chunk)
+                digest.update(chunk)  # pyrefly: ignore[unknown-argument-type]
+                _ = out.write(chunk)  # pyrefly: ignore[unknown-argument-type]
                 if on_chunk:
-                    on_chunk(len(chunk))
+                    on_chunk(len(chunk))  # pyrefly: ignore[unknown-argument-type]
     except OSError as exc:
         partial.unlink(missing_ok=True)
         raise FetchError(f"could not download {asset.name}: {exc}") from exc
@@ -733,7 +734,7 @@ def download_asset(
             f"release recorded."
         )
 
-    partial.replace(target)
+    _ = partial.replace(target)
     return target, actual
 
 

@@ -19,7 +19,7 @@ import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 from .errors import InspectionError
 
@@ -277,8 +277,8 @@ def _elf_libc(path: Path, head: bytes, ei_class: int, endian: str) -> str:
             return "static"
 
         with path.open("rb") as fh:
-            fh.seek(e_phoff)
-            table: bytes = fh.read(e_phentsize * e_phnum)
+            _ = fh.seek(e_phoff)
+            table: bytes = fh.read(e_phentsize * e_phnum)  # pyrefly: ignore[unknown-argument-type]
             for i in range(e_phnum):
                 entry: bytes = table[i * e_phentsize : (i + 1) * e_phentsize]
                 if len(entry) < e_phentsize:
@@ -294,7 +294,7 @@ def _elf_libc(path: Path, head: bytes, ei_class: int, endian: str) -> str:
                     p_filesz = struct.unpack_from(f"{endian}I", entry, 0x10)[0]
                 if p_filesz > 0x1000:
                     return "glibc"
-                fh.seek(p_offset)
+                _ = fh.seek(p_offset)
                 interp: str = (
                     fh.read(p_filesz).rstrip(b"\x00").decode("utf-8", "replace")
                 )
@@ -373,15 +373,18 @@ def _elf_verneed(
         return None
 
     with path.open("rb") as fh:
-        fh.seek(e_shoff)
-        table: bytes = fh.read(e_shentsize * e_shnum)
+        _ = fh.seek(e_shoff)
+        table: bytes = fh.read(e_shentsize * e_shnum)  # pyrefly: ignore[unknown-argument-type]
         if len(table) < e_shentsize * e_shnum:
             return None
 
         def field(index: int, at: int, fmt: str) -> int:
-            return struct.unpack_from(
-                f"{endian}{fmt}", table, index * e_shentsize + at
-            )[0]
+            return cast(
+                "int",
+                struct.unpack_from(f"{endian}{fmt}", table, index * e_shentsize + at)[  # pyrefly: ignore[unknown-argument-type]
+                    0
+                ],
+            )
 
         for i in range(e_shnum):
             if field(i, type_at, "I") != SHT_GNU_VERNEED:
@@ -389,9 +392,9 @@ def _elf_verneed(
             strtab_index: int = field(i, link_at, "I")
             if strtab_index >= e_shnum:
                 return None
-            fh.seek(field(i, offset_at, word))
+            _ = fh.seek(field(i, offset_at, word))
             verneed: bytes = fh.read(field(i, size_at, word))
-            fh.seek(field(strtab_index, offset_at, word))
+            _ = fh.seek(field(strtab_index, offset_at, word))
             strtab: bytes = fh.read(field(strtab_index, size_at, word))
             return verneed, strtab
     return None
@@ -403,7 +406,7 @@ def _parse_macho(path: Path, head: bytes, magic_be: int) -> BinaryInfo:
         raise InspectionError(f"{path}: truncated Mach-O header")
 
     (cputype,) = struct.unpack_from(f"{endian}I", head, 0x04)
-    arch = MACHO_CPUS.get(cputype & 0xFFFFFFFF) or MACHO_CPUS.get(cputype)
+    arch = MACHO_CPUS.get(cputype & 0xFFFFFFFF) or MACHO_CPUS.get(cputype)  # pyrefly: ignore[unknown-argument-type]
     if arch is None:
         raise InspectionError(
             f"{path}: unsupported Mach-O cputype 0x{cputype & 0xFFFFFFFF:x}. "
@@ -467,7 +470,7 @@ def _parse_macho_universal(path: Path, head: bytes, magic_be: int) -> BinaryInfo
         if off + entry_size > len(head):
             break
         (cputype,) = struct.unpack_from(">i", head, off)
-        arch: str | None = MACHO_CPUS.get(cputype & 0xFFFFFFFF)
+        arch: str | None = MACHO_CPUS.get(cputype & 0xFFFFFFFF)  # pyrefly: ignore[unknown-argument-type]
         if arch is None:
             continue
         arches.append(arch)
@@ -497,7 +500,7 @@ def _slice_min_version(
         else:
             (slice_off,) = struct.unpack_from(">I", head, entry_off + 0x08)
         with path.open("rb") as fh:
-            fh.seek(slice_off)
+            _ = fh.seek(slice_off)
             sub: bytes = fh.read(0x1000)
         if len(sub) < 0x20:
             return None
@@ -525,7 +528,7 @@ def _parse_pe(path: Path, head: bytes) -> BinaryInfo:
     if head[e_lfanew : e_lfanew + 4] != b"PE\x00\x00":
         raise InspectionError(f"{path}: MZ header without a PE signature")
 
-    (machine,) = struct.unpack_from("<H", head, e_lfanew + 0x04)
+    (machine,) = struct.unpack_from("<H", head, e_lfanew + 0x04)  # pyrefly: ignore[unknown-argument-type]
     arch: str | None = PE_MACHINES.get(machine)
     if arch is None:
         raise InspectionError(

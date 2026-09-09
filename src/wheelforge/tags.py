@@ -119,7 +119,7 @@ def _glibc_baseline(info: BinaryInfo) -> str | None:
     measured: str = f"{info.glibc_min[0]}_{info.glibc_min[1]}"
     if default is None:
         return measured
-    return max(measured, default, key=lambda v: tuple(map(int, v.split("_"))))
+    return max(measured, default, key=lambda v: tuple(map(int, v.split("_"))))  # pyrefly: ignore[unknown-argument-type,implicit-any-lambda]
 
 
 def _normalise_glibc(version: str) -> str:

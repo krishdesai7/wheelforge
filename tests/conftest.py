@@ -256,7 +256,7 @@ def write_binary(tmp_path: Path) -> Callable[[str, bytes, Mode], Path]:
         path = tmp_path / name
         # `name` may carry a directory, for tests needing two same-named files.
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        _ = path.write_bytes(data)
         path.chmod(mode)
         return path
 
@@ -269,8 +269,8 @@ def elf_binary(write_binary: Callable[[str, bytes, Mode], Path]) -> Path:
 
 
 @pytest.fixture
-def macho_binary(write_binary) -> Path:
-    return write_binary("tool", make_macho(0x0100000C))
+def macho_binary(write_binary: Callable[[str, bytes], Path]) -> Path:
+    return write_binary("tool", make_macho(cputype=0x0100000C))
 
 
 #: A real, runnable script: the installed-wheel test executes what it packages,
@@ -284,7 +284,7 @@ def shell_script(write_binary: Callable[[str, bytes, Mode], Path]) -> Path:
 
 
 @pytest.fixture
-def fake_http(monkeypatch) -> dict[str, bytes | Exception]:
+def fake_http(monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes | Exception]:
     """Route `fetch`'s only HTTP entry point to an in-memory table.
 
     Every request the module makes funnels through `fetch._open`, so replacing
@@ -294,7 +294,7 @@ def fake_http(monkeypatch) -> dict[str, bytes | Exception]:
     """
     routes: dict[str, bytes | Exception] = {}
 
-    def _open(url: str, **_kwargs: Any) -> Any:
+    def _open(url: str, **_kwargs: Any) -> Any:  # pyrefly: ignore[explicit-any]
         payload: bytes | Exception | None = routes.get(url)
         if payload is None:
             raise urllib.error.HTTPError(

@@ -27,8 +27,11 @@ import zipfile
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from _csv import Writer
+    from typing import Final
 from .errors import BuildError
 
 #: Fixed timestamp for every entry, so repeated builds of identical inputs
@@ -115,7 +118,7 @@ def retag_wheel(
     if not seen_wheel_meta:  # pragma: no cover - guarded above
         raise BuildError(f"{wheel.name}: WHEEL metadata was not rewritten")
 
-    target.write_bytes(buffer.getvalue())
+    _ = target.write_bytes(buffer.getvalue())
     if target != wheel:
         wheel.unlink()
 
@@ -157,7 +160,7 @@ def _sha256_digest(data: bytes) -> str:
 def _render_record(records: list[tuple[str, str, int]], record_name: str) -> bytes:
     """Build a PEP 376 RECORD. Its own entry carries no hash or size."""
     out = io.StringIO(newline="")
-    writer: csv.Writer = csv.writer(out, lineterminator="\n")
+    writer: Writer = csv.writer(out, lineterminator="\n")
     for path, digest, size in records:
         writer.writerow([path, digest, size])
     writer.writerow([record_name, "", ""])
@@ -206,7 +209,7 @@ def _rewrite_wheel_metadata(data: bytes, tag: str) -> bytes:
     ]
     # Keep the trailing blank line convention of message-style metadata.
     while kept and not kept[-1].strip():
-        kept.pop()
+        _ = kept.pop()
     purelib: str = "true" if _is_pure(tag) else "false"
     kept.append(f"Root-Is-Purelib: {purelib}")
     kept.extend(f"Tag: {t}" for t in expand_tags(tag))

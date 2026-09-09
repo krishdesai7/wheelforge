@@ -108,7 +108,7 @@ def build_package(
     with tempfile.TemporaryDirectory(prefix="wheelforge-") as tmp:
         project_root: Path = Path(tmp) / spec.dist_name
         project_root.mkdir(parents=True)
-        scaffold_project(spec, binary, project_root)
+        _ = scaffold_project(spec, binary, project_root)
 
         raw_wheel: Path = build_wheel(
             project_root, Path(tmp) / "wheel", isolated=isolated, verbose=verbose
@@ -119,7 +119,7 @@ def build_package(
             kept = Path(keep_project)
             if kept.exists():
                 shutil.rmtree(kept)
-            shutil.copytree(project_root, kept)
+            _ = shutil.copytree(project_root, kept)
 
         result: RetagResult = retag_wheel(
             raw_wheel,
@@ -270,5 +270,5 @@ def _place_wheel(built: Path, output_dir: Path, *, overwrite: bool) -> Path:
             f"input duplicates an earlier one, or pass --overwrite to replace it."
         )
 
-    target.write_bytes(data)
+    _ = target.write_bytes(data)
     return target

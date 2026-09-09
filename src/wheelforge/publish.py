@@ -97,7 +97,7 @@ def run_publish(plan: PublishPlan) -> None:
     so a missing one is reported before any upload is attempted.
     """
     if plan.needs_token:
-        resolve_token()
+        _ = resolve_token()
 
     try:
         completed: subprocess.CompletedProcess[bytes] = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]

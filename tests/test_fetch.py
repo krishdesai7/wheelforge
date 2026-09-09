@@ -98,7 +98,9 @@ class TestParseSource:
             ),
         ],
     )
-    def test_recognised_forms(self, source, expected) -> None:
+    def test_recognised_forms(
+        self, source: str, expected: tuple[str, str, str | None]
+    ) -> None:
         assert fetch.parse_source(source) == expected
 
     def test_an_asset_url_yields_the_tag_not_the_asset(self) -> None:
@@ -126,9 +128,9 @@ class TestParseSource:
         )
 
     @pytest.mark.parametrize("source", ["", "   ", "https://github.com/acme"])
-    def test_something_that_names_no_repository_is_refused(self, source) -> None:
+    def test_something_that_names_no_repository_is_refused(self, source: str) -> None:
         with pytest.raises(FetchError):
-            fetch.parse_source(source)
+            _ = fetch.parse_source(source)
 
 
 # --------------------------------------------------------------------------
@@ -141,8 +143,8 @@ class TestGetRelease:
         base = "https://api.github.com/repos/acme/tool/releases"
         return f"{base}/tags/{tag}" if tag else f"{base}/latest"
 
-    def payload(self, **overrides: Any) -> bytes:
-        body: dict[str, Any] = {
+    def payload(self, **overrides: Any) -> bytes:  # pyrefly: ignore[explicit-any]
+        body: dict[str, Any] = {  # pyrefly: ignore[explicit-any]
             "tag_name": "v1.0.0",
             "assets": [
                 {
@@ -156,18 +158,24 @@ class TestGetRelease:
         body.update(overrides)
         return json.dumps(body).encode()
 
-    def test_assets_and_digests_are_read(self, fake_http) -> None:
+    def test_assets_and_digests_are_read(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         fake_http[self.api_url()] = self.payload()
         result = fetch.get_release("acme", "tool", "v1.0.0")
         assert result.tag == "v1.0.0"
         assert result.assets[0].name == "tool-linux.tar.gz"
         assert result.assets[0].digest == DIGEST
 
-    def test_a_missing_tag_asks_for_the_latest_release(self, fake_http) -> None:
+    def test_a_missing_tag_asks_for_the_latest_release(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         fake_http[self.api_url(None)] = self.payload(tag_name="v9.9.9")
         assert fetch.get_release("acme", "tool").tag == "v9.9.9"
 
-    def test_a_digest_of_another_algorithm_is_ignored(self, fake_http) -> None:
+    def test_a_digest_of_another_algorithm_is_ignored(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         """Only sha256 is verified here, so anything else must read as absent."""
         fake_http[self.api_url()] = self.payload(
             assets=[
@@ -181,7 +189,9 @@ class TestGetRelease:
         )
         assert fetch.get_release("acme", "tool", "v1.0.0").assets[0].digest is None
 
-    def test_a_malformed_digest_is_ignored(self, fake_http) -> None:
+    def test_a_malformed_digest_is_ignored(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         fake_http[self.api_url()] = self.payload(
             assets=[
                 {
@@ -198,28 +208,34 @@ class TestGetRelease:
     def test_an_unknown_tag_mentions_private_repositories(self) -> None:
         """No route registered, so the fake answers 404 as GitHub would."""
         with pytest.raises(FetchError, match="GH_TOKEN"):
-            fetch.get_release("acme", "tool", "v1.0.0")
+            _ = fetch.get_release("acme", "tool", "v1.0.0")
 
-    def test_an_exhausted_rate_limit_says_so(self, fake_http) -> None:
+    def test_an_exhausted_rate_limit_says_so(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         headers = email.message.Message()
         headers["X-RateLimit-Remaining"] = "0"
         fake_http[self.api_url()] = urllib.error.HTTPError(
             self.api_url(), 403, "rate limit exceeded", headers, None
         )
         with pytest.raises(FetchError, match="rate limit"):
-            fetch.get_release("acme", "tool", "v1.0.0")
+            _ = fetch.get_release("acme", "tool", "v1.0.0")
 
-    def test_a_forbidden_response_is_not_read_as_a_rate_limit(self, fake_http) -> None:
+    def test_a_forbidden_response_is_not_read_as_a_rate_limit(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         fake_http[self.api_url()] = urllib.error.HTTPError(
             self.api_url(), 403, "Forbidden", email.message.Message(), None
         )
         with pytest.raises(FetchError, match="expired"):
-            fetch.get_release("acme", "tool", "v1.0.0")
+            _ = fetch.get_release("acme", "tool", "v1.0.0")
 
-    def test_being_offline_is_reported_as_such(self, fake_http) -> None:
+    def test_being_offline_is_reported_as_such(
+        self, fake_http: dict[str, bytes | Exception]
+    ) -> None:
         fake_http[self.api_url()] = OSError("Name or service not known")
         with pytest.raises(FetchError, match="could not reach GitHub"):
-            fetch.get_release("acme", "tool", "v1.0.0")
+            _ = fetch.get_release("acme", "tool", "v1.0.0")
 
 
 # --------------------------------------------------------------------------
@@ -238,14 +254,14 @@ class TestSelectAssets:
             asset("tool-windows.zip"),
         )
 
-    def test_no_pattern_takes_every_payload_asset(self, full) -> None:
+    def test_no_pattern_takes_every_payload_asset(self, full: Release) -> None:
         assert [a.name for a in fetch.select_assets(full, [])] == [
             "tool-x86_64-linux.tar.gz",
             "tool-aarch64-darwin.tar.gz",
             "tool-windows.zip",
         ]
 
-    def test_checksum_files_are_never_payload(self, full) -> None:
+    def test_checksum_files_are_never_payload(self, full: Release) -> None:
         """A `*.tar.gz*` pattern sweeps up sidecars; they must not be downloaded."""
         chosen = fetch.select_assets(full, ["*.tar.gz*"])
         assert [a.name for a in chosen] == [
@@ -253,14 +269,14 @@ class TestSelectAssets:
             "tool-aarch64-darwin.tar.gz",
         ]
 
-    def test_patterns_accumulate_without_duplicating(self, full) -> None:
+    def test_patterns_accumulate_without_duplicating(self, full: Release) -> None:
         chosen = fetch.select_assets(full, ["*linux*", "*.tar.gz"])
         assert [a.name for a in chosen] == [
             "tool-x86_64-linux.tar.gz",
             "tool-aarch64-darwin.tar.gz",
         ]
 
-    def test_release_order_is_preserved(self, full) -> None:
+    def test_release_order_is_preserved(self, full: Release) -> None:
         """Patterns given back to front still yield the release's own order."""
         chosen = fetch.select_assets(full, ["*windows*", "*linux*"])
         assert [a.name for a in chosen] == [
@@ -268,18 +284,20 @@ class TestSelectAssets:
             "tool-windows.zip",
         ]
 
-    def test_a_pattern_matching_nothing_is_an_error(self, full) -> None:
+    def test_a_pattern_matching_nothing_is_an_error(self, full: Release) -> None:
         """Silently downloading fewer files than asked for is the worse failure."""
         with pytest.raises(FetchError, match="no asset"):
-            fetch.select_assets(full, ["*-freebsd.tar.gz"])
+            _ = fetch.select_assets(full, ["*-freebsd.tar.gz"])
 
-    def test_the_error_lists_what_was_available(self, full) -> None:
+    def test_the_error_lists_what_was_available(self, full: Release) -> None:
         with pytest.raises(FetchError, match=re.escape("tool-windows.zip")):
-            fetch.select_assets(full, ["*-freebsd.tar.gz"])
+            _ = fetch.select_assets(full, ["*-freebsd.tar.gz"])
 
-    def test_a_pattern_matching_only_checksums_explains_itself(self, full) -> None:
+    def test_a_pattern_matching_only_checksums_explains_itself(
+        self, full: Release
+    ) -> None:
         with pytest.raises(FetchError, match="only checksum files"):
-            fetch.select_assets(full, ["*.sha256"])
+            _ = fetch.select_assets(full, ["*.sha256"])
 
 
 class TestUnpackableAssetsAreNotPayload:
@@ -302,24 +320,24 @@ class TestUnpackableAssetsAreNotPayload:
             asset("tool.sbom.json"),
         )
 
-    def test_installers_are_left_out_of_the_default_set(self, mixed) -> None:
+    def test_installers_are_left_out_of_the_default_set(self, mixed: Release) -> None:
         assert [a.name for a in fetch.select_assets(mixed, [])] == [
             "tool-windows.zip",
             "tool-linux.tar.gz",
         ]
 
-    def test_a_pattern_cannot_drag_an_installer_back_in(self, mixed) -> None:
+    def test_a_pattern_cannot_drag_an_installer_back_in(self, mixed: Release) -> None:
         """`-p '*windows*'` means the zip, not the .msi sitting beside it."""
-        chosen = fetch.select_assets(mixed, ["*windows*"])
+        chosen: list[Asset] = fetch.select_assets(mixed, ["*windows*"])
         assert [a.name for a in chosen] == ["tool-windows.zip"]
 
-    def test_a_pattern_matching_only_installers_says_why(self, mixed) -> None:
+    def test_a_pattern_matching_only_installers_says_why(self, mixed: Release) -> None:
         with pytest.raises(FetchError, match="cannot unpack"):
-            fetch.select_assets(mixed, ["*.msi"])
+            _ = fetch.select_assets(mixed, ["*.msi"])
 
-    def test_a_pattern_matching_only_signatures_says_why(self, mixed) -> None:
+    def test_a_pattern_matching_only_signatures_says_why(self, mixed: Release) -> None:
         with pytest.raises(FetchError, match="signatures and attestations"):
-            fetch.select_assets(mixed, ["*.sig"])
+            _ = fetch.select_assets(mixed, ["*.sig"])
 
     def test_an_extensionless_asset_is_still_payload(self) -> None:
         """A release shipping the bare executable is the case a whitelist breaks."""
@@ -330,10 +348,10 @@ class TestUnpackableAssetsAreNotPayload:
         "name",
         ["tool.MSI", "tool.Deb", "TOOL.PKG"],
     )
-    def test_the_check_is_case_insensitive(self, name) -> None:
+    def test_the_check_is_case_insensitive(self, name: str) -> None:
         assert not fetch.is_payload_asset(name)
 
-    def test_a_reason_is_given_for_every_exclusion(self, mixed) -> None:
+    def test_a_reason_is_given_for_every_exclusion(self, mixed: Release) -> None:
         """`--list` prints these, so none may come back as None or empty."""
         excluded = [
             a.name
@@ -452,7 +470,9 @@ class TestFindDigest:
 
 
 class TestDownloadAsset:
-    def test_a_matching_digest_writes_the_file(self, fake_http, tmp_path) -> None:
+    def test_a_matching_digest_writes_the_file(
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
+    ) -> None:
         item = asset("tool.tar.gz")
         fake_http[item.url] = PAYLOAD
         path, digest = fetch.download_asset(item, tmp_path, expected=DIGEST)
@@ -460,56 +480,60 @@ class TestDownloadAsset:
         assert digest == DIGEST
 
     def test_a_mismatch_raises_and_leaves_nothing_behind(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         """Bytes that failed verification must never sit where `build` looks."""
         item = asset("tool.tar.gz")
         fake_http[item.url] = b"something else entirely"
         with pytest.raises(FetchError, match="does not match"):
-            fetch.download_asset(item, tmp_path, expected=DIGEST)
+            _ = fetch.download_asset(item, tmp_path, expected=DIGEST)
         assert list(tmp_path.iterdir()) == []
 
     def test_a_failed_transfer_leaves_no_partial_file(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         item = asset("tool.tar.gz")
         fake_http[item.url] = OSError("connection reset")
         with pytest.raises(FetchError, match="could not download"):
-            fetch.download_asset(item, tmp_path, expected=DIGEST)
+            _ = fetch.download_asset(item, tmp_path, expected=DIGEST)
         assert list(tmp_path.iterdir()) == []
 
     @pytest.mark.usefixtures("fake_http")
-    def test_an_already_correct_file_is_not_downloaded_again(self, tmp_path) -> None:
+    def test_an_already_correct_file_is_not_downloaded_again(
+        self, tmp_path: Path
+    ) -> None:
         """Re-running over a populated directory has to be cheap."""
         item = asset("tool.tar.gz")
-        (tmp_path / item.name).write_bytes(PAYLOAD)
+        _ = (tmp_path / item.name).write_bytes(PAYLOAD)
         # No route registered: reaching the network at all would 404.
         path, digest = fetch.download_asset(item, tmp_path, expected=DIGEST)
         assert digest == DIGEST
         assert path.read_bytes() == PAYLOAD
 
     def test_a_stale_file_of_the_same_name_is_replaced(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         item = asset("tool.tar.gz")
-        (tmp_path / item.name).write_bytes(b"an older version")
+        _ = (tmp_path / item.name).write_bytes(b"an older version")
         fake_http[item.url] = PAYLOAD
         path, _ = fetch.download_asset(item, tmp_path, expected=DIGEST)
         assert path.read_bytes() == PAYLOAD
 
     def test_the_digest_is_reported_even_when_unchecked(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         item = asset("tool.tar.gz")
         fake_http[item.url] = PAYLOAD
         _, digest = fetch.download_asset(item, tmp_path, expected=None)
         assert digest == DIGEST
 
-    def test_progress_is_reported_by_the_byte(self, fake_http, tmp_path) -> None:
+    def test_progress_is_reported_by_the_byte(
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
+    ) -> None:
         item = asset("tool.tar.gz")
         fake_http[item.url] = PAYLOAD
         seen: list[int] = []
-        fetch.download_asset(item, tmp_path, expected=DIGEST, on_chunk=seen.append)
+        _ = fetch.download_asset(item, tmp_path, expected=DIGEST, on_chunk=seen.append)
         assert sum(seen) == len(PAYLOAD)
 
 
@@ -545,27 +569,29 @@ class TestRedirectHandler:
 
 
 class TestExtract:
-    def test_a_tarball_keeps_the_executable_bit(self, tmp_path) -> None:
+    def test_a_tarball_keeps_the_executable_bit(self, tmp_path: Path) -> None:
         """The one permission that has to survive, or the binary is unrunnable."""
         archive = make_tarball(tmp_path / "tool.tar.gz", {"tool": (PAYLOAD, 0o755)})
         written = fetch.extract(archive, tmp_path / "out")
         assert [p.name for p in written] == ["tool"]
         assert written[0].stat().st_mode & 0o111
 
-    def test_a_plain_file_stays_unexecutable(self, tmp_path) -> None:
+    def test_a_plain_file_stays_unexecutable(self, tmp_path: Path) -> None:
         archive = make_tarball(tmp_path / "tool.tar.gz", {"README": (b"hello", 0o644)})
         written = fetch.extract(archive, tmp_path / "out")
         assert not written[0].stat().st_mode & 0o111
 
-    def test_a_traversing_member_is_refused(self, tmp_path) -> None:
+    def test_a_traversing_member_is_refused(self, tmp_path: Path) -> None:
         archive = make_tarball(
             tmp_path / "evil.tar.gz", {"../escaped": (b"owned", 0o644)}
         )
         with pytest.raises(FetchError, match="outside"):
-            fetch.extract(archive, tmp_path / "out")
+            _ = fetch.extract(archive, tmp_path / "out")
         assert not (tmp_path / "escaped").exists()
 
-    def test_an_absolute_member_is_defanged_rather_than_refused(self, tmp_path) -> None:
+    def test_an_absolute_member_is_defanged_rather_than_refused(
+        self, tmp_path: Path
+    ) -> None:
         """tarfile strips the leading separator, as GNU tar does, so it stays in."""
         archive = make_tarball(
             tmp_path / "odd.tar.gz", {"/absolute/owned": (b"owned", 0o644)}
@@ -574,30 +600,34 @@ class TestExtract:
         assert written == [tmp_path / "out" / "absolute" / "owned"]
         assert written[0].read_bytes() == b"owned"
 
-    def test_a_corrupt_archive_is_reported_not_raised_raw(self, tmp_path) -> None:
+    def test_a_corrupt_archive_is_reported_not_raised_raw(self, tmp_path: Path) -> None:
         archive = tmp_path / "tool.tar.gz"
-        archive.write_bytes(b"not a tarball at all")
+        _ = archive.write_bytes(b"not a tarball at all")
         with pytest.raises(FetchError, match="could not unpack"):
-            fetch.extract(archive, tmp_path / "out")
+            _ = fetch.extract(archive, tmp_path / "out")
 
-    def test_a_zip_regains_the_executable_bit(self, tmp_path) -> None:
+    def test_a_zip_regains_the_executable_bit(self, tmp_path: Path) -> None:
         """`zipfile` discards the stored mode, which would leave it unrunnable."""
         archive = make_zip(tmp_path / "tool.zip", {"tool.exe": (PAYLOAD, 0o755)})
         written = fetch.extract(archive, tmp_path / "out")
         assert written[0].stat().st_mode & 0o111
 
-    def test_a_zip_entry_stored_without_a_mode_is_left_alone(self, tmp_path) -> None:
+    def test_a_zip_entry_stored_without_a_mode_is_left_alone(
+        self, tmp_path: Path
+    ) -> None:
         archive = make_zip(tmp_path / "tool.zip", {"notes.txt": (b"hi", 0)})
         written = fetch.extract(archive, tmp_path / "out")
         assert not written[0].stat().st_mode & 0o111
 
-    def test_something_that_is_not_an_archive_is_not_an_error(self, tmp_path) -> None:
+    def test_something_that_is_not_an_archive_is_not_an_error(
+        self, tmp_path: Path
+    ) -> None:
         """A release may ship the bare executable, or an installer."""
         plain = tmp_path / "tool-linux-amd64"
-        plain.write_bytes(PAYLOAD)
+        _ = plain.write_bytes(PAYLOAD)
         assert fetch.extract(plain, tmp_path / "out") == []
 
-    def test_a_windows_zip_leaves_the_exe_without_a_mode(self, tmp_path) -> None:
+    def test_a_windows_zip_leaves_the_exe_without_a_mode(self, tmp_path: Path) -> None:
         """The precondition for the counting bug: a real .exe, no `+x` on disk.
 
         A zip written on Windows stores DOS attributes rather than a Unix mode,
@@ -617,7 +647,9 @@ class TestExtract:
             ("tool-linux-amd64", "tool-linux-amd64"),
         ],
     )
-    def test_the_extraction_directory_drops_the_whole_suffix(self, name, stem) -> None:
+    def test_the_extraction_directory_drops_the_whole_suffix(
+        self, name: str, stem: str
+    ) -> None:
         assert fetch.archive_stem(name) == stem
 
 
@@ -637,31 +669,33 @@ class TestExtractedExecutablesAreCountedByParsing:
             extracted=tuple(paths),
         )
 
-    def test_a_binary_without_the_executable_bit_still_counts(self, tmp_path) -> None:
+    def test_a_binary_without_the_executable_bit_still_counts(
+        self, tmp_path: Path
+    ) -> None:
         unmarked = tmp_path / "tool.exe"
-        unmarked.write_bytes(PAYLOAD)
+        _ = unmarked.write_bytes(PAYLOAD)
         unmarked.chmod(0o644)
         assert self.fetched(unmarked).executables == (unmarked,)
 
-    def test_a_file_that_does_not_parse_is_not_counted(self, tmp_path) -> None:
+    def test_a_file_that_does_not_parse_is_not_counted(self, tmp_path: Path) -> None:
         readme = tmp_path / "README"
-        readme.write_bytes(b"just some prose\n")
+        _ = readme.write_bytes(b"just some prose\n")
         assert self.fetched(readme).executables == ()
 
-    def test_an_executable_bit_alone_does_not_qualify(self, tmp_path) -> None:
+    def test_an_executable_bit_alone_does_not_qualify(self, tmp_path: Path) -> None:
         """The inverse error: chmod +x on a text file is not a program."""
         script = tmp_path / "notes"
-        script.write_bytes(b"still just prose\n")
+        _ = script.write_bytes(b"still just prose\n")
         script.chmod(0o755)
         assert self.fetched(script).executables == ()
 
-    def test_the_count_matches_what_discover_finds(self, tmp_path) -> None:
+    def test_the_count_matches_what_discover_finds(self, tmp_path: Path) -> None:
         binary = tmp_path / "tool.exe"
-        binary.write_bytes(PAYLOAD)
+        _ = binary.write_bytes(PAYLOAD)
         binary.chmod(0o644)
-        (tmp_path / "README").write_bytes(b"prose\n")
+        _ = (tmp_path / "README").write_bytes(b"prose\n")
 
-        found = discover.collect(tmp_path)
+        found: discover.Discovery = discover.collect(tmp_path)
         assert len(self.fetched(binary, tmp_path / "README").executables) == len(
             found.candidates
         )
@@ -674,14 +708,14 @@ class TestExtractedExecutablesAreCountedByParsing:
 
 class TestFetchAssets:
     @pytest.fixture
-    def tarball(self, tmp_path) -> bytes:
+    def tarball(self, tmp_path: Path) -> bytes:
         path = make_tarball(tmp_path / "src.tar.gz", {"tool": (PAYLOAD, 0o755)})
         data = path.read_bytes()
         path.unlink()
         return data
 
     def test_assets_are_downloaded_verified_and_unpacked(
-        self, fake_http, tmp_path, tarball
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path, tarball: bytes
     ) -> None:
         digest = hashlib.sha256(tarball).hexdigest()
         item = asset("tool-linux.tar.gz", digest=digest, size=len(tarball))
@@ -693,7 +727,9 @@ class TestFetchAssets:
         assert result.extracted_to == tmp_path / "dl" / "tool-linux"
         assert [p.name for p in result.executables] == ["tool"]
 
-    def test_extraction_can_be_declined(self, fake_http, tmp_path, tarball) -> None:
+    def test_extraction_can_be_declined(
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path, tarball: bytes
+    ) -> None:
         digest = hashlib.sha256(tarball).hexdigest()
         item = asset("tool-linux.tar.gz", digest=digest)
         fake_http[item.url] = tarball
@@ -705,27 +741,29 @@ class TestFetchAssets:
         assert result.path.is_file()
 
     def test_an_unverifiable_asset_stops_everything_up_front(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         """Nothing is written, so there is no half-done state to reason about."""
         item = asset("tool-linux.tar.gz")
         fake_http[item.url] = PAYLOAD
         with pytest.raises(FetchError, match="--allow-unverified"):
-            fetch.fetch_assets(release(item), [item], tmp_path / "dl")
+            _ = fetch.fetch_assets(release(item), [item], tmp_path / "dl")
         assert not (tmp_path / "dl").exists()
 
     def test_one_unverifiable_asset_blocks_the_verifiable_ones(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         good = asset("good.tar.gz", digest=DIGEST)
         bad = asset("bad.tar.gz")
         fake_http[good.url] = PAYLOAD
         fake_http[bad.url] = PAYLOAD
         with pytest.raises(FetchError, match=re.escape("bad.tar.gz")):
-            fetch.fetch_assets(release(good, bad), [good, bad], tmp_path / "dl")
+            _ = fetch.fetch_assets(release(good, bad), [good, bad], tmp_path / "dl")
         assert not (tmp_path / "dl").exists()
 
-    def test_the_override_lets_them_through(self, fake_http, tmp_path) -> None:
+    def test_the_override_lets_them_through(
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
+    ) -> None:
         item = asset("tool-linux-amd64")
         fake_http[item.url] = PAYLOAD
         (result,) = fetch.fetch_assets(
@@ -735,7 +773,7 @@ class TestFetchAssets:
         assert result.digest == DIGEST  # still reported, just not checked
 
     def test_a_bare_executable_asset_needs_no_unpacking(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         """Plenty of releases ship the binary itself rather than an archive."""
         item = asset("tool-linux-amd64", digest=DIGEST)
@@ -745,16 +783,16 @@ class TestFetchAssets:
         assert result.path.read_bytes() == PAYLOAD
 
     def test_an_archive_that_will_not_open_is_an_error(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         """A verified download can still be a broken archive; say so."""
         item = asset("tool-linux.tar.gz", digest=DIGEST)
         fake_http[item.url] = PAYLOAD  # verifies, but is not a tarball
         with pytest.raises(FetchError, match="could not unpack"):
-            fetch.fetch_assets(release(item), [item], tmp_path / "dl")
+            _ = fetch.fetch_assets(release(item), [item], tmp_path / "dl")
 
     def test_a_sidecar_is_consulted_when_the_api_has_no_digest(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         item = asset("tool-linux-amd64")
         sidecar = asset("tool-linux-amd64.sha256")
@@ -766,7 +804,7 @@ class TestFetchAssets:
         assert result.verification.source == "tool-linux-amd64.sha256"
 
     def test_a_sidecar_that_disagrees_fails_the_download(
-        self, fake_http, tmp_path
+        self, fake_http: dict[str, bytes | Exception], tmp_path: Path
     ) -> None:
         item = asset("tool-linux-amd64")
         sidecar = asset("tool-linux-amd64.sha256")
@@ -774,25 +812,27 @@ class TestFetchAssets:
         fake_http[sidecar.url] = f"{'0' * 64}\n".encode()
 
         with pytest.raises(FetchError, match="does not match"):
-            fetch.fetch_assets(release(item, sidecar), [item], tmp_path / "dl")
+            _ = fetch.fetch_assets(release(item, sidecar), [item], tmp_path / "dl")
 
 
 class TestTokenIsEnvironmentOnly:
     """Same discipline as the publish token: never an option, never in argv."""
 
-    def test_no_token_means_none(self, monkeypatch) -> None:
+    def test_no_token_means_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for name in fetch.TOKEN_ENVS:
             monkeypatch.delenv(name, raising=False)
         assert fetch.resolve_token() is None
 
     @pytest.mark.parametrize("name", fetch.TOKEN_ENVS)
-    def test_either_variable_is_honoured(self, monkeypatch, name) -> None:
+    def test_either_variable_is_honoured(
+        self, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
         for other in fetch.TOKEN_ENVS:
             monkeypatch.delenv(other, raising=False)
         monkeypatch.setenv(name, "  secret  ")
         assert fetch.resolve_token() == "secret"
 
-    def test_gh_token_takes_precedence(self, monkeypatch) -> None:
+    def test_gh_token_takes_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GH_TOKEN", "first")
         monkeypatch.setenv("GITHUB_TOKEN", "second")
         assert fetch.resolve_token() == "first"

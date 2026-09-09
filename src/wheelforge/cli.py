@@ -780,7 +780,7 @@ def _plan_builds(
     glibc: str | None,
     macos_min: str | None,
     universal2: bool,
-    spec_fields: dict[str, Any],
+    spec_fields: dict[str, Any],  # pyrefly: ignore[explicit-any]
 ) -> list[tuple[Path, PackageSpec]]:
     """Resolve a tag and a spec for every discovered binary.
 
@@ -984,7 +984,7 @@ def publish_command(
         if plan.needs_token and not dry_run:
             # Checked up front so a missing token is reported before the user
             # is asked to confirm, rather than after they commit to the upload.
-            resolve_token()
+            _ = resolve_token()
     except WheelforgeError as exc:
         raise _fail(str(exc)) from exc
 
@@ -1086,9 +1086,9 @@ def help_command(
         return
 
     group = root_ctx.command
-    subcommand = group.get_command(root_ctx, command)  # type: ignore[attr-defined]
+    subcommand = group.get_command(root_ctx, command)  # ty: ignore[unresolved-attribute]
     if subcommand is None:
-        known: str = ", ".join(sorted(group.list_commands(root_ctx)))  # type: ignore[attr-defined]
+        known: str = ", ".join(sorted(group.list_commands(root_ctx)))  # ty: ignore[unresolved-attribute]
         raise _fail(f"unknown command {command!r}. Available commands: {known}")
 
     # Parenting the context to the root keeps the usage line fully qualified,
