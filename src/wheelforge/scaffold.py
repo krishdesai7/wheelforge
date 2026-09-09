@@ -244,7 +244,7 @@ class PackageSpec:
 
     @property
     def installed_names(self) -> list[str]:
-        """File names the executable carries once installed.
+        r"""File names the executable carries once installed.
 
         In shim mode it keeps its original name inside the package, so there is
         one, whatever the aliases. In direct mode the staged file *becomes* the

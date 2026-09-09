@@ -279,7 +279,7 @@ class TestDirectLauncher:
 
 
 class TestWindowsSuffix:
-    """Direct mode renames the staged file, and Windows reads the suffix.
+    r"""Direct mode renames the staged file, and Windows reads the suffix.
 
     A `starship.exe` installed as `Scripts\\starship` is a file Windows will
     not execute, so `.exe` has to survive being renamed after the alias.

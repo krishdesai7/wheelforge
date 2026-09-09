@@ -22,7 +22,9 @@ def linux(
     )
 
 
-def macos(arch: str, minos: tuple[int, int] | None = None, slices=()) -> BinaryInfo:
+def macos(
+    arch: str, minos: tuple[int, int] | None = None, slices: tuple[str, ...] = ()
+) -> BinaryInfo:
     return BinaryInfo(
         path=Path(),
         format="macho",
@@ -57,7 +59,7 @@ class TestLinux:
             ("riscv64", "manylinux_2_31_riscv64"),
         ],
     )
-    def test_glibc_defaults(self, arch, expected) -> None:
+    def test_glibc_defaults(self, arch: str, expected: str) -> None:
         assert platform_tag(linux(arch)) == expected
 
     def test_musl_uses_musllinux(self) -> None:
@@ -73,7 +75,7 @@ class TestLinux:
         )
 
     @pytest.mark.parametrize("arch", ["aarch64", "i686", "armv7l", "riscv64"])
-    def test_both_halves_agree_on_the_architecture(self, arch) -> None:
+    def test_both_halves_agree_on_the_architecture(self, arch: str) -> None:
         many, musl = platform_tag(linux(arch, "static")).split(".")
         assert many.endswith(f"_{arch}")
         assert musl == f"musllinux_1_2_{arch}"
@@ -86,13 +88,13 @@ class TestLinux:
         assert platform_tag(linux("x86_64", "glibc")) == "manylinux_2_17_x86_64"
 
     @pytest.mark.parametrize("spelling", ["2.28", "2_28"])
-    def test_glibc_override_accepts_both_spellings(self, spelling) -> None:
+    def test_glibc_override_accepts_both_spellings(self, spelling: str) -> None:
         tag = platform_tag(linux("x86_64"), glibc_version=spelling)
         assert tag == "manylinux_2_28_x86_64"
 
     def test_unknown_arch_is_rejected(self) -> None:
         with pytest.raises(InspectionError, match="no manylinux baseline"):
-            platform_tag(linux("sparc64"))
+            _ = platform_tag(linux("sparc64"))
 
 
 class TestMeasuredGlibcFloor:
@@ -159,7 +161,7 @@ class TestWindows:
         ("arch", "expected"),
         [("x86_64", "win_amd64"), ("i686", "win32"), ("arm64", "win_arm64")],
     )
-    def test_tags(self, arch, expected) -> None:
+    def test_tags(self, arch: str, expected: str) -> None:
         assert platform_tag(windows(arch)) == expected
 
 
@@ -167,15 +169,15 @@ class TestUntaggableSystems:
     """Wheel tags exist for Linux, macOS and Windows. Nothing else."""
 
     @pytest.mark.parametrize("system", ["freebsd", "netbsd", "openbsd", "solaris"])
-    def test_refused_rather_than_passed_off_as_linux(self, system) -> None:
+    def test_refused_rather_than_passed_off_as_linux(self, system: str) -> None:
         info = BinaryInfo(path=Path(), format="elf", os=system, arch="x86_64")
         with pytest.raises(InspectionError, match="no wheel platform tag exists"):
-            platform_tag(info)
+            _ = platform_tag(info)
 
     def test_the_error_points_at_the_way_out(self) -> None:
         info = BinaryInfo(path=Path(), format="elf", os="freebsd", arch="x86_64")
         with pytest.raises(InspectionError, match="--platform-tag"):
-            platform_tag(info)
+            _ = platform_tag(info)
 
 
 class TestScript:
