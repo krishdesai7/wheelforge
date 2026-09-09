@@ -38,9 +38,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "build>=1.5.0",
-    "packaging>=26.2",
-    "typer>=0.27.0",
+    "build>=1.6.0",
+    "packaging>=26.3",
+    "typer>=0.27.2",
     "uv_build>=0.12.11,<0.13",
 ]
 
@@ -58,11 +58,11 @@ email = "krish@desai.ml"
 
 [dependency-groups]
 dev = [
-    "complexipy>=6.2.0",
-    "pyrefly>=1.1.1",
+    "complexipy>=8.0.1",
+    "pyrefly>=1.2.0",
     "pytest>=9.1.1",
-    "ruff>=0.16.0",
-    "rust-just>=1.57.0",
+    "ruff>=0.16.6",
+    "rust-just>=1.58.0",
 ]
 
 release = ["rooster==0.1.1"]
