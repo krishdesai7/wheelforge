@@ -130,7 +130,13 @@ def fetch_command(
             help="Release URL, or `owner/repo` for the latest release.",
         ),
     ],
-    dest: Annotated[Path, typer.Argument(help="Directory to download into.")] = Path(),
+    dest: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Directory to download into. Defaults to `./<repo>`, so a "
+            "release does not scatter its assets across the working directory.",
+        ),
+    ] = None,
     tag: Annotated[
         str | None,
         typer.Option("--tag", "-t", help="Release tag, if **SOURCE** has none."),
@@ -188,6 +194,8 @@ def fetch_command(
     except WheelforgeError as exc:
         raise _fail(str(exc)) from exc
 
+    into: Path = dest if dest is not None else _default_dest(release.repo)
+
     console.print(
         f"[bold]{release.slug}[/] [dim]{release.tag}[/] "
         f"[dim]-- {len(chosen)} of {len(release.assets)} assets selected[/]"
@@ -201,7 +209,7 @@ def fetch_command(
                 "wheelforge",
                 "fetch",
                 source,
-                dest if dest != Path() else Path(release.repo),
+                into,
                 *[arg for p in (pattern or ()) for arg in ("-p", p)],
             )
         return
@@ -210,7 +218,7 @@ def fetch_command(
         results: list[fetch.FetchedAsset] = _run_fetch(
             release,
             chosen,
-            dest,
+            into,
             extract_archives=extract_archives,
             allow_unverified=allow_unverified,
             timeout=timeout,
@@ -218,7 +226,23 @@ def fetch_command(
     except WheelforgeError as exc:
         raise _fail(str(exc)) from exc
 
-    _report_fetched(results, dest)
+    _report_fetched(results, into)
+
+
+def _default_dest(repo: str) -> Path:
+    """Where a release lands when no destination is given: `./<repo>`.
+
+    A release is a set of files rather than one, and a dozen tarballs loose in
+    the working directory is the state the next `build` has to be aimed around.
+    An explicit `.` still means `.`, which is why the argument defaults to None
+    rather than to this.
+
+    The name comes out of a URL path, so it is only used when it stays put:
+    anything that would climb out of the working directory falls back to it.
+    """
+    if repo in {"", ".", ".."} or {"/", "\\"} & set(repo):
+        return Path()
+    return Path(repo)
 
 
 def _resolve_release(source: str, tag: str | None, *, timeout: float) -> fetch.Release:

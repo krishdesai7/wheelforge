@@ -181,6 +181,16 @@ bit reported "12 fetched, 9 extracted" for a release whose every archive held a 
 it, and `Path(dest) / "/abs"` is `/abs` — so joining the raw name would report a path nothing was
 written to.
 
+`fetch`'s destination argument defaults to `None`, not to `Path(".")`, and `cli._default_dest`
+turns that into `./<repo>`. The sentinel has to be `None` because the two cases are otherwise
+indistinguishable, and an explicit `.` must keep meaning `.` — the previous `dest != Path()`
+comparison could not tell them apart, which is why the `--list` suggestion had to re-derive the
+directory for itself. `_default_dest` also refuses a name that would not stay put (`.`, `..`, or
+anything holding a separator): `release.repo` comes out of a URL path segment, and while a name
+like that would 404 before anything was written, the guard is cheaper than depending on that.
+Nothing calls `mkdir` for it — `download_asset` already creates its `dest_dir`, so `--list` still
+writes nothing.
+
 ### The launcher choice reshapes everything downstream
 
 `Launcher.DIRECT` (default) vs `Launcher.SHIM` is not a flag checked in one place; it changes the

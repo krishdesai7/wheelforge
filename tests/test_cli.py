@@ -691,6 +691,45 @@ class TestFetchCommand:
         assert extracted.is_file()
         assert extracted.stat().st_mode & 0o111
 
+    def test_no_destination_writes_into_a_directory_named_for_the_repo(
+        self,
+        fake_http: dict[str, bytes],
+        tarball: tuple[bytes, str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self.stub_release(fake_http, tarball, digest=True)
+        monkeypatch.chdir(tmp_path)
+        result: Result = run("fetch", "acme/tool", "-t", "v1.0.0", "-p", "*.tar.gz")
+        assert result.exit_code == 0
+        assert (tmp_path / "tool" / "tool-linux.tar.gz").is_file()
+        # Nothing loose in the working directory.
+        assert [p.name for p in tmp_path.iterdir()] == ["tool"]
+
+    def test_an_explicit_dot_still_means_the_working_directory(
+        self,
+        fake_http: dict[str, bytes],
+        tarball: tuple[bytes, str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self.stub_release(fake_http, tarball, digest=True)
+        monkeypatch.chdir(tmp_path)
+        result: Result = run(
+            "fetch", "acme/tool", ".", "-t", "v1.0.0", "-p", "*.tar.gz"
+        )
+        assert result.exit_code == 0
+        assert (tmp_path / "tool-linux.tar.gz").is_file()
+        assert not (tmp_path / "tool" / "tool-linux.tar.gz").exists()
+
+    def test_list_suggests_the_default_destination(
+        self, fake_http: dict[str, bytes], tarball: tuple[bytes, str]
+    ) -> None:
+        self.stub_release(fake_http, tarball, digest=True)
+        result: Result = run("fetch", "acme/tool", "-t", "v1.0.0", "--list")
+        assert result.exit_code == 0
+        assert "wheelforge fetch acme/tool tool" in plain_output(result)
+
     def test_the_summary_points_at_the_next_command(
         self, fake_http: dict[str, bytes], tarball: tuple[bytes, str], tmp_path: Path
     ) -> None:

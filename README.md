@@ -47,24 +47,26 @@ Most tools you want to package are published as a GitHub release, so `fetch` get
 and checks them in one step:
 
 ```zsh
-$ wheelforge fetch https://github.com/<owner>/<repo>/releases/tag/<version> <destination-directory>
+$ wheelforge fetch https://github.com/<owner>/<repo>/releases/tag/<version>
 <owner>/<repo> <version> -- <number of assets selected> of <total number of assets> assets selected
   ok <asset-name>-<platform-tag>.tar.gz (size, the GitHub API)
   ...
-fetched <number of assets> asset(s) into <destination-directory>, <number of executables> executable(s) extracted
+fetched <number of assets> asset(s) into <repo>, <number of executables> executable(s) extracted
 check what they are:
-  wheelforge inspect <destination-directory>
+  wheelforge inspect <repo>
 ```
 
-Every asset is verified before it is unpacked, and each archive lands in a directory
-named after it. Installers and checksum files are skipped, so no `--pattern` is needed for
-the common case. See [Fetching release assets](#fetching-release-assets) for the details.
+With no destination given the release lands in `./<repo>`, since a release is a set of
+files rather than one; name a directory as a second argument to put it elsewhere. Every
+asset is verified before it is unpacked, and each archive lands in a directory named after
+it. Installers and checksum files are skipped, so no `--pattern` is needed for the common
+case. See [Fetching release assets](#fetching-release-assets) for the details.
 
 `build` then takes that whole directory and turns it into one wheel per platform:
 
 ```zsh
-$ wheelforge build <destination-directory> -n <name> -V <version>
-building <number of wheels> wheels from <number of executables> executables in <destination-directory>
+$ wheelforge build <repo> -n <name> -V <version>
+building <number of wheels> wheels from <number of executables> executables in <repo>
   ok <name>-<version>-py3-none-<platform-tag>.whl (size)
   ...
 built <number of wheels> wheels into dist (launcher direct, scripts <name>)
@@ -108,6 +110,10 @@ release — and a directory to work in.
 ```zsh
 wheelforge fetch <release-url> <dir> -p '<glob>'
 ```
+
+The directory is optional and defaults to `./<repo>`. A release is a dozen or so files,
+and putting them straight into the working directory is the state the next `build` has to
+be aimed around; an explicit `.` still means `.` if that is what you want.
 
 It talks to the GitHub API directly rather than shelling out to `gh`, so `uvx wheelforge`
 works on a machine with nothing else installed. Public releases need no credentials. A
@@ -518,6 +524,7 @@ In `direct` mode `binary_path()` locates the installed file rather than computin
 
 ```zsh
 wheelforge fetch SOURCE [DIR]         token comes from $GH_TOKEN or $GITHUB_TOKEN
+    DIR                       where to download (default: ./<repo>)
     -t, --tag TAG             release tag, if SOURCE has none
     -p, --pattern GLOB        asset names to download (repeatable)
         --list                show the release's assets and exit
